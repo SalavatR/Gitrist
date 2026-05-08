@@ -1442,6 +1442,7 @@ dependencies = [
  "dioxus",
  "gloo-net",
  "serde",
+ "time",
 ]
 
 [[package]]
