@@ -17,6 +17,8 @@ struct CommitInfo {
     oid: String,
     short_oid: String,
     summary: String,
+    body: String,
+    parents: Vec<String>,
     author_name: String,
     author_email: String,
     time_unix: i64,
@@ -26,6 +28,13 @@ struct CommitInfo {
 struct StatusEntry {
     path: String,
     kind: String,
+}
+
+#[derive(Deserialize, Clone, PartialEq, Debug)]
+struct BranchInfo {
+    name: String,
+    oid: Option<String>,
+    is_head: bool,
 }
 
 const DEFAULT_REPO: &str = "/home/salavat/gitrust";
@@ -47,6 +56,10 @@ pub fn App() -> Element {
     let status = use_resource(move || {
         let path = current_repo.read().clone();
         async move { fetch_status(&path).await }
+    });
+    let branches = use_resource(move || {
+        let path = current_repo.read().clone();
+        async move { fetch_branches(&path).await }
     });
 
     rsx! {
@@ -84,6 +97,11 @@ pub fn App() -> Element {
         }
 
         section {
+            h2 { "Branches" }
+            {render_branches(&branches.read_unchecked())}
+        }
+
+        section {
             h2 { "Working tree" }
             {render_status(&status.read_unchecked())}
         }
@@ -102,6 +120,8 @@ pub fn App() -> Element {
             a { href: "/api/repo/log?path={current_repo}&limit={LOG_LIMIT}", target: "_blank", "log" }
             " · "
             a { href: "/api/repo/status?path={current_repo}", target: "_blank", "status" }
+            " · "
+            a { href: "/api/repo/branches?path={current_repo}", target: "_blank", "branches" }
         }
     }
 }
@@ -153,11 +173,76 @@ fn render_log(state: &Option<Result<Vec<CommitInfo>, String>>) -> Element {
                     }
                     tbody {
                         for c in rows {
-                            tr { key: "{c.oid}",
-                                td { code { "{c.short_oid}" } }
-                                td { class: "author", "{c.author_name}" }
-                                td { class: "summary", "{c.summary}" }
-                                td { class: "when", title: "{c.time_unix}", "{format_time(c.time_unix)}" }
+                            {render_commit_row(c)}
+                        }
+                    }
+                }
+            }
+        }
+        Some(Err(e)) => {
+            let msg = e.clone();
+            rsx! { p { class: "err", "Error: {msg}" } }
+        }
+        None => rsx! { p { class: "muted", "Loading…" } },
+    }
+}
+
+fn render_commit_row(c: CommitInfo) -> Element {
+    let parents_short = c
+        .parents
+        .iter()
+        .map(|p| p.chars().take(8).collect::<String>())
+        .collect::<Vec<_>>()
+        .join("  ");
+    rsx! {
+        tr { key: "{c.oid}",
+            td { code { "{c.short_oid}" } }
+            td { class: "author", "{c.author_name}" }
+            td { class: "summary",
+                details {
+                    summary { "{c.summary}" }
+                    if !c.body.is_empty() {
+                        pre { class: "body", "{c.body}" }
+                    }
+                    div { class: "meta",
+                        "oid "
+                        code { "{c.oid}" }
+                        if !c.parents.is_empty() {
+                            " · parents "
+                            code { "{parents_short}" }
+                        }
+                    }
+                }
+            }
+            td { class: "when", title: "{c.time_unix}", "{format_time(c.time_unix)}" }
+        }
+    }
+}
+
+fn render_branches(state: &Option<Result<Vec<BranchInfo>, String>>) -> Element {
+    match state {
+        Some(Ok(branches)) if branches.is_empty() => {
+            rsx! { p { class: "muted", "No local branches." } }
+        }
+        Some(Ok(branches)) => {
+            let rows = branches.clone();
+            rsx! {
+                table { class: "branches",
+                    tbody {
+                        for b in rows {
+                            tr { key: "{b.name}", class: if b.is_head { "head" } else { "" },
+                                td { class: "marker", if b.is_head { "●" } else { "" } }
+                                td { class: "name", "{b.name}" }
+                                td { class: "oid",
+                                    code {
+                                        {
+                                            b.oid
+                                                .as_ref()
+                                                .map(|o| o.chars().take(12).collect::<String>())
+                                                .unwrap_or_else(|| "(none)".to_string())
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
@@ -250,6 +335,21 @@ async fn fetch_status(path: &str) -> Result<Vec<StatusEntry>, String> {
         .map_err(|e| e.to_string())
 }
 
+#[cfg(target_arch = "wasm32")]
+async fn fetch_branches(path: &str) -> Result<Vec<BranchInfo>, String> {
+    let url = format!("/api/repo/branches?path={path}");
+    let resp = gloo_net::http::Request::get(&url)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    if !resp.ok() {
+        return Err(format!("HTTP {}", resp.status()));
+    }
+    resp.json::<Vec<BranchInfo>>()
+        .await
+        .map_err(|e| e.to_string())
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 async fn fetch_summary(_path: &str) -> Result<RepoSummary, String> {
     Err("native build: fetching not implemented".into())
@@ -262,5 +362,10 @@ async fn fetch_log(_path: &str, _limit: usize) -> Result<Vec<CommitInfo>, String
 
 #[cfg(not(target_arch = "wasm32"))]
 async fn fetch_status(_path: &str) -> Result<Vec<StatusEntry>, String> {
+    Err("native build: fetching not implemented".into())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+async fn fetch_branches(_path: &str) -> Result<Vec<BranchInfo>, String> {
     Err("native build: fetching not implemented".into())
 }

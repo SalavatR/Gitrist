@@ -17,6 +17,8 @@ pub struct CommitInfo {
     pub oid: String,
     pub short_oid: String,
     pub summary: String,
+    pub body: String,
+    pub parents: Vec<String>,
     pub author_name: String,
     pub author_email: String,
     pub time_unix: i64,
@@ -26,6 +28,13 @@ pub struct CommitInfo {
 pub struct StatusEntry {
     pub path: String,
     pub kind: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BranchInfo {
+    pub name: String,
+    pub oid: Option<String>,
+    pub is_head: bool,
 }
 
 pub fn summarize_repo(path: &Path) -> anyhow::Result<RepoSummary> {
@@ -52,12 +61,20 @@ pub fn log_commits(path: &Path, limit: usize) -> anyhow::Result<Vec<CommitInfo>>
         let oid_str = info.id.to_string();
         let commit = repo.find_object(info.id)?.try_into_commit()?;
         let author = commit.author()?;
-        let summary = commit.message()?.summary().to_string();
+        let message = commit.message()?;
+        let summary = message.summary().to_string();
+        let body = message
+            .body
+            .map(|b| b.to_string())
+            .unwrap_or_default();
+        let parents: Vec<String> = commit.parent_ids().map(|id| id.to_string()).collect();
         let time = commit.time()?;
         commits.push(CommitInfo {
             short_oid: oid_str.chars().take(8).collect(),
             oid: oid_str,
             summary,
+            body,
+            parents,
             author_name: author.name.to_string(),
             author_email: author.email.to_string(),
             time_unix: time.seconds,
@@ -98,11 +115,36 @@ pub fn list_status(path: &Path) -> anyhow::Result<Vec<StatusEntry>> {
                     kind: "untracked".into(),
                 });
             }
-            Item::Rewrite { .. } => {
-                // skip rename/copy detection in first cut
-            }
+            Item::Rewrite { .. } => {}
         }
     }
     out.sort_by(|a, b| a.path.cmp(&b.path));
     Ok(out)
+}
+
+pub fn list_branches(path: &Path) -> anyhow::Result<Vec<BranchInfo>> {
+    let repo = gix::open(path)?;
+    let head_full = repo
+        .head_name()?
+        .map(|n| n.as_bstr().to_string());
+
+    let mut branches = Vec::new();
+    let refs = repo.references()?;
+    for r in refs.local_branches()? {
+        let r = r.map_err(|e| anyhow::anyhow!("{e}"))?;
+        let full = r.name().as_bstr().to_string();
+        let short = full
+            .strip_prefix("refs/heads/")
+            .unwrap_or(&full)
+            .to_string();
+        let oid = r.try_id().map(|id| id.to_string());
+        let is_head = head_full.as_deref() == Some(full.as_str());
+        branches.push(BranchInfo {
+            name: short,
+            oid,
+            is_head,
+        });
+    }
+    branches.sort_by(|a, b| a.name.cmp(&b.name));
+    Ok(branches)
 }

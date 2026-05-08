@@ -66,6 +66,8 @@ curl 'http://127.0.0.1:3737/api/repo/log?path=/home/me/myrepo&limit=10'
     "oid": "85ea44373cc77f401b5ea4fc665c08e8c026fbe4",
     "short_oid": "85ea4437",
     "summary": "feat: bootstrap workspace",
+    "body": "Five-crate Rust workspace foundation…",
+    "parents": ["a5f16b79f0369228866b8ac86902bc840329ccae"],
     "author_name": "Salavat",
     "author_email": "s@example.com",
     "time_unix": 1778270159
@@ -73,8 +75,12 @@ curl 'http://127.0.0.1:3737/api/repo/log?path=/home/me/myrepo&limit=10'
 ]
 ```
 
+- `summary` — first line of the commit message (the title).
+- `body` — everything after the title's blank-line separator. Empty
+  string if the commit has no body.
+- `parents` — ordered list of parent commit oids. Empty for the root
+  commit; one entry for normal commits; multiple for merges.
 - `time_unix` — committer time, seconds since epoch.
-- `summary` — first line of the commit message.
 
 ## `GET /api/repo/status?path=<path>`
 
@@ -104,3 +110,27 @@ Renames and copies are detected by gix but skipped from the response
 in this version.
 
 The list is sorted lexicographically by path.
+
+## `GET /api/repo/branches?path=<path>`
+
+Lists local branches (`refs/heads/*`).
+
+```sh
+curl 'http://127.0.0.1:3737/api/repo/branches?path=/home/me/myrepo'
+```
+
+```json
+[
+  { "name": "main",     "oid": "a4343b78dedb1664…", "is_head": true  },
+  { "name": "feature1", "oid": "11223344aabbccdd…", "is_head": false }
+]
+```
+
+- `name` — short branch name (no `refs/heads/` prefix).
+- `oid` — full hex SHA-1 of the commit the branch points at, or
+  `null` for an unresolved symbolic ref.
+- `is_head` — true for the branch HEAD currently points at. False
+  for every branch when HEAD is detached.
+
+The list is sorted lexicographically by name. Remote-tracking
+branches (`refs/remotes/*`) and tags are not yet exposed.
