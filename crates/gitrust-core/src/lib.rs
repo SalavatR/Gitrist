@@ -1,5 +1,6 @@
 use std::path::Path;
 
+use gix::bstr::ByteSlice;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -19,6 +20,12 @@ pub struct CommitInfo {
     pub author_name: String,
     pub author_email: String,
     pub time_unix: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StatusEntry {
+    pub path: String,
+    pub kind: String,
 }
 
 pub fn summarize_repo(path: &Path) -> anyhow::Result<RepoSummary> {
@@ -57,4 +64,45 @@ pub fn log_commits(path: &Path, limit: usize) -> anyhow::Result<Vec<CommitInfo>>
         });
     }
     Ok(commits)
+}
+
+pub fn list_status(path: &Path) -> anyhow::Result<Vec<StatusEntry>> {
+    use gix::status::index_worktree::Item;
+    use gix::status::plumbing::index_as_worktree::EntryStatus;
+
+    let repo = gix::open(path)?;
+    let platform = repo.status(gix::progress::Discard)?;
+    let iter = platform.into_index_worktree_iter(Vec::<gix::bstr::BString>::new())?;
+
+    let mut out = Vec::new();
+    for item in iter {
+        let item = item?;
+        match item {
+            Item::Modification {
+                rela_path, status, ..
+            } => {
+                let kind = match status {
+                    EntryStatus::Conflict { .. } => "conflict",
+                    EntryStatus::Change(_) => "modified",
+                    EntryStatus::IntentToAdd => "added",
+                    EntryStatus::NeedsUpdate(_) => continue,
+                };
+                out.push(StatusEntry {
+                    path: rela_path.to_str_lossy().into_owned(),
+                    kind: kind.into(),
+                });
+            }
+            Item::DirectoryContents { entry, .. } => {
+                out.push(StatusEntry {
+                    path: entry.rela_path.to_str_lossy().into_owned(),
+                    kind: "untracked".into(),
+                });
+            }
+            Item::Rewrite { .. } => {
+                // skip rename/copy detection in first cut
+            }
+        }
+    }
+    out.sort_by(|a, b| a.path.cmp(&b.path));
+    Ok(out)
 }

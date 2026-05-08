@@ -22,6 +22,12 @@ struct CommitInfo {
     time_unix: i64,
 }
 
+#[derive(Deserialize, Clone, PartialEq, Debug)]
+struct StatusEntry {
+    path: String,
+    kind: String,
+}
+
 const DEFAULT_REPO: &str = "/home/salavat/gitrust";
 const LOG_LIMIT: usize = 50;
 
@@ -37,6 +43,10 @@ pub fn App() -> Element {
     let log = use_resource(move || {
         let path = current_repo.read().clone();
         async move { fetch_log(&path, LOG_LIMIT).await }
+    });
+    let status = use_resource(move || {
+        let path = current_repo.read().clone();
+        async move { fetch_status(&path).await }
     });
 
     rsx! {
@@ -74,6 +84,11 @@ pub fn App() -> Element {
         }
 
         section {
+            h2 { "Working tree" }
+            {render_status(&status.read_unchecked())}
+        }
+
+        section {
             h2 { "Recent commits" }
             {render_log(&log.read_unchecked())}
         }
@@ -85,6 +100,8 @@ pub fn App() -> Element {
             a { href: "/api/repo/summary?path={current_repo}", target: "_blank", "summary" }
             " · "
             a { href: "/api/repo/log?path={current_repo}&limit={LOG_LIMIT}", target: "_blank", "log" }
+            " · "
+            a { href: "/api/repo/status?path={current_repo}", target: "_blank", "status" }
         }
     }
 }
@@ -155,6 +172,34 @@ fn render_log(state: &Option<Result<Vec<CommitInfo>, String>>) -> Element {
     }
 }
 
+fn render_status(state: &Option<Result<Vec<StatusEntry>, String>>) -> Element {
+    match state {
+        Some(Ok(entries)) if entries.is_empty() => {
+            rsx! { p { class: "muted", "Working tree is clean." } }
+        }
+        Some(Ok(entries)) => {
+            let rows = entries.clone();
+            rsx! {
+                table { class: "status",
+                    tbody {
+                        for e in rows {
+                            tr { key: "{e.path}",
+                                td { class: "kind kind-{e.kind}", "{e.kind}" }
+                                td { class: "path", code { "{e.path}" } }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Some(Err(e)) => {
+            let msg = e.clone();
+            rsx! { p { class: "err", "Error: {msg}" } }
+        }
+        None => rsx! { p { class: "muted", "Loading…" } },
+    }
+}
+
 fn format_time(unix: i64) -> String {
     OffsetDateTime::from_unix_timestamp(unix)
         .ok()
@@ -190,6 +235,21 @@ async fn fetch_log(path: &str, limit: usize) -> Result<Vec<CommitInfo>, String> 
         .map_err(|e| e.to_string())
 }
 
+#[cfg(target_arch = "wasm32")]
+async fn fetch_status(path: &str) -> Result<Vec<StatusEntry>, String> {
+    let url = format!("/api/repo/status?path={path}");
+    let resp = gloo_net::http::Request::get(&url)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    if !resp.ok() {
+        return Err(format!("HTTP {}", resp.status()));
+    }
+    resp.json::<Vec<StatusEntry>>()
+        .await
+        .map_err(|e| e.to_string())
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 async fn fetch_summary(_path: &str) -> Result<RepoSummary, String> {
     Err("native build: fetching not implemented".into())
@@ -197,5 +257,10 @@ async fn fetch_summary(_path: &str) -> Result<RepoSummary, String> {
 
 #[cfg(not(target_arch = "wasm32"))]
 async fn fetch_log(_path: &str, _limit: usize) -> Result<Vec<CommitInfo>, String> {
+    Err("native build: fetching not implemented".into())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+async fn fetch_status(_path: &str) -> Result<Vec<StatusEntry>, String> {
     Err("native build: fetching not implemented".into())
 }

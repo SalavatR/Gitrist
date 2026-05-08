@@ -66,5 +66,27 @@ table.log .when {
   opacity: 0.7;
 }
 
+table.status {
+  border-collapse: collapse;
+  font-size: 0.92rem;
+}
+table.status td {
+  padding: 0.2rem 0.5rem;
+  vertical-align: top;
+  border-bottom: 1px solid rgba(127, 127, 127, 0.12);
+}
+table.status .kind {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding-right: 1rem;
+  white-space: nowrap;
+  font-weight: 600;
+}
+table.status .kind-modified  { color: #c87a00; }
+table.status .kind-added     { color: #2a8c2a; }
+table.status .kind-untracked { color: #8a8a8a; }
+table.status .kind-conflict  { color: #c33; }
+
 .links { margin-top: 2rem; opacity: 0.65; font-size: 0.9rem; }
 .links a { color: inherit; }

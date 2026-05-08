@@ -12,7 +12,9 @@ use serde::{Deserialize, Serialize};
 use tower_http::services::ServeDir;
 use tower_http::trace::TraceLayer;
 
-use gitrust_core::{CommitInfo, RepoSummary, log_commits, summarize_repo};
+use gitrust_core::{
+    CommitInfo, RepoSummary, StatusEntry, list_status, log_commits, summarize_repo,
+};
 
 #[derive(Serialize)]
 struct Health {
@@ -55,6 +57,11 @@ async fn repo_log(Query(q): Query<LogQuery>) -> Result<Json<Vec<CommitInfo>>, Ap
         .map_err(ApiError::from)
 }
 
+async fn repo_status(Query(q): Query<PathQuery>) -> Result<Json<Vec<StatusEntry>>, ApiError> {
+    let path = PathBuf::from(q.path);
+    list_status(&path).map(Json).map_err(ApiError::from)
+}
+
 struct ApiError(anyhow::Error);
 
 impl From<anyhow::Error> for ApiError {
@@ -74,7 +81,8 @@ pub fn router(web_dist: Option<PathBuf>) -> Router {
     let api = Router::new()
         .route("/health", get(health))
         .route("/repo/summary", get(repo_summary))
-        .route("/repo/log", get(repo_log));
+        .route("/repo/log", get(repo_log))
+        .route("/repo/status", get(repo_status));
 
     let mut app = Router::new().nest("/api", api);
     if let Some(dist) = web_dist {
