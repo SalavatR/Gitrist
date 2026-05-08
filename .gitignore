@@ -1,0 +1,10 @@
+/target
+/dist
+/.dx
+/.claude
+**/*.rs.bk
+.DS_Store
+.idea/
+.vscode/
+*.swp
+node_modules/

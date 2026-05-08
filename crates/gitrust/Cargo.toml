@@ -1,0 +1,17 @@
+[package]
+name = "gitrust"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "gitrust"
+path = "src/main.rs"
+
+[dependencies]
+gitrust-server = { workspace = true }
+clap = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+anyhow = { workspace = true }
