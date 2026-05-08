@@ -98,13 +98,21 @@ table.branches td.name { font-weight: 500; }
 table.branches tr.head td.name { color: #2a8c2a; }
 table.branches td.oid { opacity: 0.65; }
 
-table.log details summary {
-  cursor: pointer;
-  list-style-position: inside;
+table.log tbody tr { cursor: pointer; }
+table.log tbody tr:hover { background: rgba(127, 127, 127, 0.06); }
+table.log tbody tr.selected { background: rgba(80, 130, 220, 0.15); }
+table.log tbody tr.selected td.summary-cell { font-weight: 600; }
+table.log td.summary-cell { width: 60%; }
+
+.diff-header { margin-top: 0.5rem; }
+.diff-header .title { font-size: 1.05rem; margin-bottom: 0.4rem; }
+.diff-header .meta {
+  font-size: 0.85rem;
+  opacity: 0.7;
+  margin-bottom: 0.5rem;
 }
-table.log details[open] summary { font-weight: 600; }
-table.log details .body {
-  margin: 0.5rem 0 0.25rem;
+.diff-header .body {
+  margin: 0.5rem 0 1rem;
   padding: 0.5rem 0.75rem;
   background: rgba(127, 127, 127, 0.08);
   border-radius: 4px;
@@ -113,11 +121,57 @@ table.log details .body {
   word-break: break-word;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
-table.log details .meta {
-  font-size: 0.8rem;
-  opacity: 0.65;
-  margin-top: 0.25rem;
+
+.file-diff {
+  margin: 1rem 0;
+  border: 1px solid rgba(127, 127, 127, 0.2);
+  border-radius: 6px;
+  overflow: hidden;
 }
+.file-diff .file-header {
+  padding: 0.4rem 0.75rem;
+  background: rgba(127, 127, 127, 0.08);
+  font-size: 0.88rem;
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.file-diff .file-header .kind {
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 0.05rem 0.4rem;
+  border-radius: 3px;
+  background: rgba(127, 127, 127, 0.18);
+}
+.file-diff .file-header .kind-added    { color: #2a8c2a; background: rgba(42, 140, 42, 0.15); }
+.file-diff .file-header .kind-deleted  { color: #c33;    background: rgba(204, 51, 51, 0.15); }
+.file-diff .file-header .kind-modified { color: #c87a00; background: rgba(200, 122, 0, 0.15); }
+.file-diff .file-header .kind-renamed  { color: #5074c8; background: rgba(80, 116, 200, 0.15); }
+.file-diff .file-header .path { flex: 1; }
+.file-diff .file-header .stats {
+  font-variant-numeric: tabular-nums;
+  font-size: 0.85rem;
+  opacity: 0.75;
+}
+
+.file-diff pre.lines {
+  margin: 0;
+  padding: 0;
+  font-size: 0.82rem;
+  line-height: 1.4;
+  overflow-x: auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+.file-diff pre.lines span {
+  display: block;
+  padding: 0 0.75rem;
+  white-space: pre;
+}
+.file-diff pre.lines span.add { background: rgba(42, 140, 42, 0.12); color: #2a8c2a; }
+.file-diff pre.lines span.del { background: rgba(204, 51, 51, 0.12); color: #c33; }
 
 .links { margin-top: 2rem; opacity: 0.65; font-size: 0.9rem; }
 .links a { color: inherit; }

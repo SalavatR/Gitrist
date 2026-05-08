@@ -134,3 +134,47 @@ curl 'http://127.0.0.1:3737/api/repo/branches?path=/home/me/myrepo'
 
 The list is sorted lexicographically by name. Remote-tracking
 branches (`refs/remotes/*`) and tags are not yet exposed.
+
+## `GET /api/repo/diff?path=<path>&oid=<commit-oid>`
+
+Diff of a commit against its first parent (against the empty tree for
+a root commit). The response includes the commit's metadata so the
+UI doesn't have to fetch it separately.
+
+```sh
+curl 'http://127.0.0.1:3737/api/repo/diff?path=/home/me/myrepo&oid=85ea44…'
+```
+
+```json
+{
+  "commit": {
+    "oid": "85ea44…",
+    "short_oid": "85ea4437",
+    "summary": "feat: bootstrap workspace",
+    "body": "…",
+    "parents": ["…"],
+    "author_name": "Salavat",
+    "author_email": "s@example.com",
+    "time_unix": 1778270159
+  },
+  "files": [
+    {
+      "path": "src/main.rs",
+      "kind": "added",
+      "lines": [
+        { "added": true,  "text": "use std::path::Path;" },
+        { "added": false, "text": "removed line" }
+      ]
+    }
+  ]
+}
+```
+
+- `files[].kind` — `added` | `deleted` | `modified` | `renamed`. (Renames
+  detected by gix's tree diff are reported but their `lines` array is
+  currently empty; full rename-aware blob diff is on the TODO.)
+- `files[].lines[].added` — true for additions, false for deletions.
+  No context lines yet — only changed lines are included.
+
+Tree-level entries (directories) are filtered from the response;
+only file changes appear.

@@ -3,18 +3,25 @@
 Roadmap for `gitrust`. Strikethrough = done. Order roughly by priority
 within each section.
 
-## Diff viewer (next up)
+## Diff viewer
 
-- [ ] `GET /api/repo/diff?path=…&oid=…` — diff between a commit and
+- [x] `GET /api/repo/diff?path=…&oid=…` — diff between a commit and
       its first parent (empty tree for the root commit). Backed by
-      `gix-diff::tree`.
-- [ ] `GET /api/repo/diff/working?path=…&file=…` — patch for one
-      working-tree file (modified path); for untracked entries fall
-      back to "all-add" rendering of file content.
-- [ ] UI: click a commit row → show patch inline beneath it. Click a
-      status entry → show its diff inline.
-- [ ] Lightweight unified-diff rendering (additions green, deletions
-      red); proper tokenization via `syntect` or `tree-sitter` later.
+      `gix-diff::tree` + `gix::object::blob::diff::Platform::lines`.
+- [x] UI: click a commit row → "Commit detail" section below the log
+      shows full body, parents, and per-file diff with green/red
+      colored add/delete lines.
+- [ ] Context lines around hunks (currently changes only — no
+      surrounding unchanged lines). Needs a different gix-diff entry
+      point or imara-diff's `UnifiedDiff` printer with a context
+      config.
+- [ ] `GET /api/repo/diff/working?path=…&file=…` — patch for a
+      single working-tree file (modified or untracked); UI shows it
+      inline with the status entry that's clicked.
+- [ ] Rename-aware blob diff for `Change::Rewrite` (currently the
+      file is reported as `renamed` but its `lines` array is empty).
+- [ ] Syntax highlighting via `syntect` or `tree-sitter`.
+- [ ] Per-file collapse/expand for very large diffs.
 
 ## Reads (more history surface)
 
