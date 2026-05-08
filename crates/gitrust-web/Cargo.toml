@@ -10,5 +10,5 @@ path = "src/main.rs"
 
 [dependencies]
 gitrust-ui = { workspace = true }
-dioxus = { workspace = true }
+dioxus = { workspace = true, features = ["web"] }
 dioxus-web = { workspace = true }
