@@ -1,4 +1,5 @@
 use std::net::SocketAddr;
+use std::path::PathBuf;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
@@ -15,6 +16,8 @@ enum Command {
     Serve {
         #[arg(long, default_value = "127.0.0.1:3737")]
         addr: SocketAddr,
+        #[arg(long)]
+        web_dist: Option<PathBuf>,
     },
     App,
 }
@@ -30,7 +33,7 @@ async fn main() -> Result<()> {
 
     let cli = Cli::parse();
     match cli.command {
-        Command::Serve { addr } => gitrust_server::serve(addr).await?,
+        Command::Serve { addr, web_dist } => gitrust_server::serve(addr, web_dist).await?,
         Command::App => anyhow::bail!("`gitrust app` not implemented yet"),
     }
     Ok(())

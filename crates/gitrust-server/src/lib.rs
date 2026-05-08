@@ -1,12 +1,39 @@
 use std::net::SocketAddr;
+use std::path::PathBuf;
 
-use axum::{Json, Router, routing::get};
-use serde::Serialize;
+use axum::{
+    Json, Router,
+    extract::Query,
+    http::StatusCode,
+    response::IntoResponse,
+    routing::get,
+};
+use serde::{Deserialize, Serialize};
+use tower_http::services::ServeDir;
+use tower_http::trace::TraceLayer;
+
+use gitrust_core::{CommitInfo, RepoSummary, log_commits, summarize_repo};
 
 #[derive(Serialize)]
 struct Health {
     status: &'static str,
     version: &'static str,
+}
+
+#[derive(Deserialize)]
+struct PathQuery {
+    path: String,
+}
+
+#[derive(Deserialize)]
+struct LogQuery {
+    path: String,
+    #[serde(default = "default_limit")]
+    limit: usize,
+}
+
+fn default_limit() -> usize {
+    50
 }
 
 async fn health() -> Json<Health> {
@@ -16,13 +43,52 @@ async fn health() -> Json<Health> {
     })
 }
 
-pub fn router() -> Router {
-    Router::new().route("/api/health", get(health))
+async fn repo_summary(Query(q): Query<PathQuery>) -> Result<Json<RepoSummary>, ApiError> {
+    let path = PathBuf::from(q.path);
+    summarize_repo(&path).map(Json).map_err(ApiError::from)
 }
 
-pub async fn serve(addr: SocketAddr) -> anyhow::Result<()> {
+async fn repo_log(Query(q): Query<LogQuery>) -> Result<Json<Vec<CommitInfo>>, ApiError> {
+    let path = PathBuf::from(q.path);
+    log_commits(&path, q.limit.min(500))
+        .map(Json)
+        .map_err(ApiError::from)
+}
+
+struct ApiError(anyhow::Error);
+
+impl From<anyhow::Error> for ApiError {
+    fn from(e: anyhow::Error) -> Self {
+        Self(e)
+    }
+}
+
+impl IntoResponse for ApiError {
+    fn into_response(self) -> axum::response::Response {
+        let body = serde_json::json!({ "error": self.0.to_string() });
+        (StatusCode::BAD_REQUEST, Json(body)).into_response()
+    }
+}
+
+pub fn router(web_dist: Option<PathBuf>) -> Router {
+    let api = Router::new()
+        .route("/health", get(health))
+        .route("/repo/summary", get(repo_summary))
+        .route("/repo/log", get(repo_log));
+
+    let mut app = Router::new().nest("/api", api);
+    if let Some(dist) = web_dist {
+        app = app.fallback_service(ServeDir::new(dist));
+    }
+    app.layer(TraceLayer::new_for_http())
+}
+
+pub async fn serve(addr: SocketAddr, web_dist: Option<PathBuf>) -> anyhow::Result<()> {
     let listener = tokio::net::TcpListener::bind(addr).await?;
-    tracing::info!("gitrust-server listening on http://{}", listener.local_addr()?);
-    axum::serve(listener, router()).await?;
+    tracing::info!(
+        "gitrust-server listening on http://{}",
+        listener.local_addr()?
+    );
+    axum::serve(listener, router(web_dist)).await?;
     Ok(())
 }
