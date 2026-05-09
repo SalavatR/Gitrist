@@ -39,9 +39,11 @@ within each section.
 
 ## Reads (more history surface)
 
-- [ ] Remote-tracking branches (`refs/remotes/*`) in
-      `/api/repo/branches`, grouped by remote.
-- [ ] Tags (`refs/tags/*`) — separate endpoint or extend branches.
+- [x] Remote-tracking branches (`refs/remotes/*`). Separate endpoint
+      `/api/repo/remotes`, sidebar block. Per-remote HEAD filtered.
+- [x] Tags (`refs/tags/*`). Separate endpoint `/api/repo/tags`,
+      sidebar block. Annotated vs lightweight detected via
+      `peel_to_id` comparison.
 - [ ] File tree at a commit/HEAD: `/api/repo/tree?path=…&oid=…`.
 - [ ] Commit-by-oid: `/api/repo/commit?path=…&oid=…` for permalinks.
 - [ ] Blame: `/api/repo/blame?path=…&file=…`.

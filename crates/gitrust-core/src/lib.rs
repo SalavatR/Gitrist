@@ -43,6 +43,20 @@ pub struct BranchInfo {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TagInfo {
+    pub name: String,
+    pub oid: Option<String>,
+    pub annotated: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RemoteBranchInfo {
+    pub name: String,   // "origin/main"
+    pub remote: String, // "origin"
+    pub oid: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DiffLine {
     pub kind: String, // "ctx" | "add" | "del"
     pub old_line: Option<u32>,
@@ -165,6 +179,58 @@ pub fn list_status(path: &Path) -> anyhow::Result<Vec<StatusEntry>> {
     }
     out.sort_by(|a, b| a.path.cmp(&b.path));
     Ok(out)
+}
+
+pub fn list_tags(path: &Path) -> anyhow::Result<Vec<TagInfo>> {
+    let repo = gix::open(path)?;
+    let refs = repo.references()?;
+    let mut tags = Vec::new();
+    for r in refs.tags()? {
+        let mut r = r.map_err(|e| anyhow::anyhow!("{e}"))?;
+        let full = r.name().as_bstr().to_string();
+        let short = full.strip_prefix("refs/tags/").unwrap_or(&full).to_string();
+        let direct_id = r.try_id().map(|id| id.to_string());
+        let peeled = r.peel_to_id().ok().map(|id| id.to_string());
+        let annotated = direct_id.is_some() && peeled.as_ref() != direct_id.as_ref();
+        let oid = peeled.or(direct_id);
+        tags.push(TagInfo {
+            name: short,
+            oid,
+            annotated,
+        });
+    }
+    tags.sort_by(|a, b| a.name.cmp(&b.name));
+    Ok(tags)
+}
+
+pub fn list_remote_branches(path: &Path) -> anyhow::Result<Vec<RemoteBranchInfo>> {
+    let repo = gix::open(path)?;
+    let refs = repo.references()?;
+    let mut remotes = Vec::new();
+    for r in refs.remote_branches()? {
+        let r = r.map_err(|e| anyhow::anyhow!("{e}"))?;
+        let full = r.name().as_bstr().to_string();
+        let short = full
+            .strip_prefix("refs/remotes/")
+            .unwrap_or(&full)
+            .to_string();
+        // Skip the per-remote HEAD pseudo-ref (e.g. refs/remotes/origin/HEAD).
+        if short.ends_with("/HEAD") {
+            continue;
+        }
+        let remote = short
+            .split_once('/')
+            .map(|(r, _)| r.to_string())
+            .unwrap_or_default();
+        let oid = r.try_id().map(|id| id.to_string());
+        remotes.push(RemoteBranchInfo {
+            name: short,
+            remote,
+            oid,
+        });
+    }
+    remotes.sort_by(|a, b| a.name.cmp(&b.name));
+    Ok(remotes)
 }
 
 pub fn list_branches(path: &Path) -> anyhow::Result<Vec<BranchInfo>> {

@@ -232,6 +232,9 @@ a:hover { text-decoration: underline; }
 .branch-list li .name { font-weight: 500; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .branch-list li.head .name { color: var(--add); font-weight: 600; }
 .branch-list li .oid { font-family: var(--mono); font-size: 0.78rem; color: var(--muted); }
+.branch-list li .marker.tag { color: var(--tok-attribute); }
+.branch-list li .marker.tag.annotated { color: var(--accent); }
+.branch-list li .marker.remote { color: var(--tok-namespace); font-size: 0.85rem; }
 
 /* Status list */
 .status-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }

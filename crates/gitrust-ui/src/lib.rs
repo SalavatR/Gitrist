@@ -38,6 +38,20 @@ struct BranchInfo {
 }
 
 #[derive(Deserialize, Clone, PartialEq, Debug)]
+struct TagInfo {
+    name: String,
+    oid: Option<String>,
+    annotated: bool,
+}
+
+#[derive(Deserialize, Clone, PartialEq, Debug)]
+struct RemoteBranchInfo {
+    name: String,
+    remote: String,
+    oid: Option<String>,
+}
+
+#[derive(Deserialize, Clone, PartialEq, Debug)]
 struct DiffLine {
     kind: String,
     old_line: Option<u32>,
@@ -119,6 +133,14 @@ pub fn App() -> Element {
         let path = current_repo.read().clone();
         async move { fetch_branches(&path).await }
     });
+    let remotes = use_resource(move || {
+        let path = current_repo.read().clone();
+        async move { fetch_remotes(&path).await }
+    });
+    let tags = use_resource(move || {
+        let path = current_repo.read().clone();
+        async move { fetch_tags(&path).await }
+    });
     let diff = use_resource(move || {
         let path = current_repo.read().clone();
         let oid = selected_oid.read().clone();
@@ -175,6 +197,20 @@ pub fn App() -> Element {
                             {render_branch_count(&branches.read_unchecked())}
                         }
                         {render_branches(&branches.read_unchecked())}
+                    }
+                    section { class: "side-block",
+                        div { class: "side-title",
+                            span { "Remotes" }
+                            {render_remote_count(&remotes.read_unchecked())}
+                        }
+                        {render_remotes(&remotes.read_unchecked())}
+                    }
+                    section { class: "side-block",
+                        div { class: "side-title",
+                            span { "Tags" }
+                            {render_tag_count(&tags.read_unchecked())}
+                        }
+                        {render_tags(&tags.read_unchecked())}
                     }
                     section { class: "side-block",
                         div { class: "side-title",
@@ -272,6 +308,24 @@ fn render_branch_count(state: &Option<Result<Vec<BranchInfo>, String>>) -> Eleme
     }
 }
 
+fn render_tag_count(state: &Option<Result<Vec<TagInfo>, String>>) -> Element {
+    if let Some(Ok(ts)) = state {
+        let n = ts.len();
+        rsx! { span { class: "count", "{n}" } }
+    } else {
+        rsx! {}
+    }
+}
+
+fn render_remote_count(state: &Option<Result<Vec<RemoteBranchInfo>, String>>) -> Element {
+    if let Some(Ok(rs)) = state {
+        let n = rs.len();
+        rsx! { span { class: "count", "{n}" } }
+    } else {
+        rsx! {}
+    }
+}
+
 fn render_status_count(state: &Option<Result<Vec<StatusEntry>, String>>) -> Element {
     if let Some(Ok(s)) = state {
         let n = s.len();
@@ -301,6 +355,77 @@ fn render_branches(state: &Option<Result<Vec<BranchInfo>, String>>) -> Element {
                             span { class: "oid",
                                 {
                                     b.oid
+                                        .as_ref()
+                                        .map(|o| o.chars().take(7).collect::<String>())
+                                        .unwrap_or_else(|| "—".to_string())
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Some(Err(e)) => {
+            let msg = e.clone();
+            rsx! { p { class: "err small", "Error: {msg}" } }
+        }
+        None => rsx! { p { class: "muted small", "Loading…" } },
+    }
+}
+
+fn render_tags(state: &Option<Result<Vec<TagInfo>, String>>) -> Element {
+    match state {
+        Some(Ok(tags)) if tags.is_empty() => {
+            rsx! { p { class: "muted small", "No tags." } }
+        }
+        Some(Ok(tags)) => {
+            let rows = tags.clone();
+            rsx! {
+                ul { class: "branch-list",
+                    for t in rows {
+                        li { key: "{t.name}",
+                            span {
+                                class: if t.annotated { "marker tag annotated" } else { "marker tag" },
+                                if t.annotated { "❖" } else { "◆" }
+                            }
+                            span { class: "name", "{t.name}" }
+                            span { class: "oid",
+                                {
+                                    t.oid
+                                        .as_ref()
+                                        .map(|o| o.chars().take(7).collect::<String>())
+                                        .unwrap_or_else(|| "—".to_string())
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Some(Err(e)) => {
+            let msg = e.clone();
+            rsx! { p { class: "err small", "Error: {msg}" } }
+        }
+        None => rsx! { p { class: "muted small", "Loading…" } },
+    }
+}
+
+fn render_remotes(state: &Option<Result<Vec<RemoteBranchInfo>, String>>) -> Element {
+    match state {
+        Some(Ok(rems)) if rems.is_empty() => {
+            rsx! { p { class: "muted small", "No remote-tracking branches." } }
+        }
+        Some(Ok(rems)) => {
+            let rows = rems.clone();
+            rsx! {
+                ul { class: "branch-list",
+                    for r in rows {
+                        li { key: "{r.name}",
+                            span { class: "marker remote", "↗" }
+                            span { class: "name", "{r.name}" }
+                            span { class: "oid",
+                                {
+                                    r.oid
                                         .as_ref()
                                         .map(|o| o.chars().take(7).collect::<String>())
                                         .unwrap_or_else(|| "—".to_string())
@@ -907,6 +1032,16 @@ async fn fetch_branches(path: &str) -> Result<Vec<BranchInfo>, String> {
 }
 
 #[cfg(target_arch = "wasm32")]
+async fn fetch_tags(path: &str) -> Result<Vec<TagInfo>, String> {
+    fetch_json(&format!("/api/repo/tags?path={path}")).await
+}
+
+#[cfg(target_arch = "wasm32")]
+async fn fetch_remotes(path: &str) -> Result<Vec<RemoteBranchInfo>, String> {
+    fetch_json(&format!("/api/repo/remotes?path={path}")).await
+}
+
+#[cfg(target_arch = "wasm32")]
 async fn fetch_diff(path: &str, oid: &str) -> Result<CommitDiff, String> {
     fetch_json(&format!("/api/repo/diff?path={path}&oid={oid}")).await
 }
@@ -945,6 +1080,16 @@ async fn fetch_status(_path: &str) -> Result<Vec<StatusEntry>, String> {
 
 #[cfg(not(target_arch = "wasm32"))]
 async fn fetch_branches(_path: &str) -> Result<Vec<BranchInfo>, String> {
+    Err("native build: fetching not implemented".into())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+async fn fetch_tags(_path: &str) -> Result<Vec<TagInfo>, String> {
+    Err("native build: fetching not implemented".into())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+async fn fetch_remotes(_path: &str) -> Result<Vec<RemoteBranchInfo>, String> {
     Err("native build: fetching not implemented".into())
 }
 

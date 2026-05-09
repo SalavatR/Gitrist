@@ -133,7 +133,46 @@ curl 'http://127.0.0.1:3737/api/repo/branches?path=/home/me/myrepo'
   for every branch when HEAD is detached.
 
 The list is sorted lexicographically by name. Remote-tracking
-branches (`refs/remotes/*`) and tags are not yet exposed.
+branches and tags are exposed via `/api/repo/remotes` and
+`/api/repo/tags` (below).
+
+## `GET /api/repo/tags?path=<path>`
+
+Lists tags (`refs/tags/*`).
+
+```sh
+curl 'http://127.0.0.1:3737/api/repo/tags?path=/home/me/myrepo'
+```
+
+```json
+[
+  { "name": "v1.0",      "oid": "abc123…", "annotated": false },
+  { "name": "v2.0-rc1",  "oid": "def456…", "annotated": true  }
+]
+```
+
+- `oid` — peeled commit oid for both lightweight and annotated tags.
+- `annotated` — true when the tag points at a tag object that wraps
+  a commit (i.e. `git tag -a` / `-s`); false for lightweight tags.
+
+## `GET /api/repo/remotes?path=<path>`
+
+Lists remote-tracking branches (`refs/remotes/<remote>/<branch>`).
+The per-remote `HEAD` pseudo-ref is filtered out.
+
+```sh
+curl 'http://127.0.0.1:3737/api/repo/remotes?path=/home/me/myrepo'
+```
+
+```json
+[
+  { "name": "origin/main",    "remote": "origin",   "oid": "abc123…" },
+  { "name": "upstream/main",  "remote": "upstream", "oid": "def456…" }
+]
+```
+
+`name` is the short form (no `refs/remotes/` prefix); `remote` is
+the leading segment so the UI can group entries by remote.
 
 ## `GET /api/repo/diff?path=<path>&oid=<commit-oid>`
 
