@@ -43,6 +43,14 @@ struct DiffLine {
     old_line: Option<u32>,
     new_line: Option<u32>,
     text: String,
+    #[serde(default)]
+    tokens: Option<Vec<HToken>>,
+}
+
+#[derive(Deserialize, Clone, PartialEq, Debug)]
+struct HToken {
+    text: String,
+    class: String,
 }
 
 #[derive(Deserialize, Clone, PartialEq, Debug)]
@@ -581,14 +589,35 @@ fn render_diff_line(l: DiffLine) -> Element {
         "del" => "-",
         _ => " ",
     };
-    let text = l.text.clone();
+    let tokens = l.tokens.clone();
+    let plain_text = l.text.clone();
     rsx! {
         div { class: "diff-line line-{kind}",
             span { class: "ln old", "{old}" }
             span { class: "ln new", "{new}" }
             span { class: "marker", "{marker}" }
-            span { class: "text", "{text}" }
+            span { class: "text",
+                if let Some(toks) = tokens {
+                    if toks.is_empty() {
+                        {rsx! { "{plain_text}" }}
+                    } else {
+                        for t in toks {
+                            span { class: "tok tok-{token_class_to_css(&t.class)}", "{t.text}" }
+                        }
+                    }
+                } else {
+                    {rsx! { "{plain_text}" }}
+                }
+            }
         }
+    }
+}
+
+fn token_class_to_css(class: &str) -> String {
+    if class.is_empty() {
+        "plain".to_string()
+    } else {
+        class.replace('.', "-")
     }
 }
 

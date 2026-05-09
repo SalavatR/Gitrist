@@ -21,6 +21,17 @@
   --untracked: #6b6b6b;
   --untracked-bg: rgba(127, 127, 127, 0.14);
 
+  --tok-keyword:     #af00db;
+  --tok-string:      #0a7d33;
+  --tok-comment:     #6a737d;
+  --tok-number:      #005cc5;
+  --tok-function:    #6f42c1;
+  --tok-type:        #d73a49;
+  --tok-variable:    #24292e;
+  --tok-attribute:   #b15c00;
+  --tok-namespace:   #032f62;
+  --tok-punctuation: #586069;
+
   --radius:    6px;
   --radius-lg: 10px;
   --shadow:    0 1px 2px rgba(0,0,0,0.04), 0 0 0 1px var(--border);
@@ -49,6 +60,17 @@
     --modified-bg: rgba(212, 154, 58, 0.14);
     --untracked: #9aa0aa;
     --untracked-bg: rgba(255, 255, 255, 0.06);
+
+    --tok-keyword:     #c586c0;
+    --tok-string:      #ce9178;
+    --tok-comment:     #6a9955;
+    --tok-number:      #b5cea8;
+    --tok-function:    #dcdcaa;
+    --tok-type:        #4ec9b0;
+    --tok-variable:    #d8dce4;
+    --tok-attribute:   #d7ba7d;
+    --tok-namespace:   #9cdcfe;
+    --tok-punctuation: #808080;
 
     --shadow:    0 1px 2px rgba(0,0,0,0.4), 0 0 0 1px var(--border);
   }
@@ -452,10 +474,46 @@ table.log .td-when {
 .diff-line.line-ctx .text { color: var(--text-2); }
 .diff-line.line-add { background: var(--add-bg); }
 .diff-line.line-add .marker { color: var(--add); }
-.diff-line.line-add .text { color: var(--add); }
 .diff-line.line-del { background: var(--del-bg); }
 .diff-line.line-del .marker { color: var(--del); }
-.diff-line.line-del .text { color: var(--del); }
+
+/* Token-level syntax highlighting (tree-sitter standard scopes) */
+.tok-plain                  { color: inherit; }
+.tok-keyword,
+.tok-keyword-control,
+.tok-keyword-directive,
+.tok-keyword-function       { color: var(--tok-keyword); font-weight: 500; }
+.tok-string,
+.tok-string-escape,
+.tok-string-special         { color: var(--tok-string); }
+.tok-comment                { color: var(--tok-comment); font-style: italic; }
+.tok-number,
+.tok-constant,
+.tok-constant-builtin       { color: var(--tok-number); }
+.tok-function,
+.tok-function-builtin,
+.tok-function-method,
+.tok-function-macro,
+.tok-constructor            { color: var(--tok-function); }
+.tok-type,
+.tok-type-builtin           { color: var(--tok-type); }
+.tok-variable,
+.tok-variable-builtin,
+.tok-variable-parameter,
+.tok-property               { color: var(--tok-variable); }
+.tok-attribute,
+.tok-tag                    { color: var(--tok-attribute); }
+.tok-namespace,
+.tok-module,
+.tok-label                  { color: var(--tok-namespace); }
+.tok-operator,
+.tok-punctuation,
+.tok-punctuation-bracket,
+.tok-punctuation-delimiter  { color: var(--tok-punctuation); }
+
+/* Within add/del rows, slightly desaturate so the row tint still reads */
+.diff-line.line-add .tok-comment,
+.diff-line.line-del .tok-comment { font-style: italic; }
 
 /* ─── Misc ────────────────────────────────────────────── */
 

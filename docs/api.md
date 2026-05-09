@@ -189,6 +189,14 @@ curl 'http://127.0.0.1:3737/api/repo/diff?path=/home/me/myrepo&oid=85ea44…'
 - `hunks[].lines[].kind` — `ctx` | `add` | `del`. Context lines have
   both `old_line` and `new_line`; additions have only `new_line`;
   deletions have only `old_line`. All line numbers are 1-indexed.
+- `hunks[].lines[].tokens` — optional `[{text, class}]` for syntax
+  highlighting (server-side, tree-sitter). Class names follow the
+  tree-sitter "highlight name" convention (`keyword`, `string`,
+  `comment`, `function`, `type`, `variable.parameter`, etc.).
+  Concatenating `text` over all tokens yields the same content as
+  the line's `text` field. Field is omitted when the file extension
+  doesn't map to a supported grammar (currently rust, json, html,
+  css, typescript, tsx, javascript, python, toml).
 
 Tree-level entries (directories) are filtered from the response;
 only file changes appear.

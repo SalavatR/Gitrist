@@ -23,7 +23,11 @@ within each section.
       shows commit diffs.
 - [ ] Rename-aware blob diff for `Change::Rewrite` (currently
       reported as `renamed` but `hunks: []`).
-- [ ] Syntax highlighting via `syntect` or `tree-sitter`.
+- [x] Syntax highlighting via `tree-sitter` + `tree-sitter-highlight`,
+      server-side. Tokens travel through the API as
+      `DiffLine.tokens: Option<Vec<{text, class}>>`. Languages: rust,
+      json, html, css, typescript, tsx, javascript, python, toml.
+      Markdown intentionally omitted (split block/inline grammars).
 - [ ] Per-file collapse/expand for very large diffs; lazy load above
       a threshold.
 - [ ] Side-by-side view as an alternative to the unified gutter.

@@ -1,8 +1,12 @@
+pub mod highlight;
+
 use std::path::Path;
 
 use gix::bstr::ByteSlice;
-use gix::diff::blob::{Algorithm, InternedInput, Token};
+use gix::diff::blob::{Algorithm, InternedInput, Token as IDToken};
 use serde::{Deserialize, Serialize};
+
+pub use highlight::Token as HighlightToken;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RepoSummary {
@@ -44,6 +48,11 @@ pub struct DiffLine {
     pub old_line: Option<u32>,
     pub new_line: Option<u32>,
     pub text: String,
+    /// Per-token syntax highlighting for `text`. `None` when the language
+    /// isn't recognised (or the file is binary). When present, the token
+    /// texts concatenate to `text`.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub tokens: Option<Vec<HighlightToken>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -242,7 +251,14 @@ pub fn diff_commit(path: &Path, oid: &str) -> anyhow::Result<CommitDiff> {
             let hunks = if is_binary {
                 Vec::new()
             } else {
-                compute_hunks(&old_bytes, &new_bytes)
+                let lang = highlight::detect_language(&location);
+                let old_tokens = lang
+                    .and_then(|l| highlight::highlight_per_line(&old_bytes, l))
+                    .unwrap_or_default();
+                let new_tokens = lang
+                    .and_then(|l| highlight::highlight_per_line(&new_bytes, l))
+                    .unwrap_or_default();
+                compute_hunks(&old_bytes, &new_bytes, &old_tokens, &new_tokens)
             };
 
             files.push(FileDiff {
@@ -302,7 +318,14 @@ pub fn diff_working(repo_path: &Path, file: &str) -> anyhow::Result<FileDiff> {
     let hunks = if is_binary {
         Vec::new()
     } else {
-        compute_hunks(&old, &new)
+        let lang = highlight::detect_language(file);
+        let old_tokens = lang
+            .and_then(|l| highlight::highlight_per_line(&old, l))
+            .unwrap_or_default();
+        let new_tokens = lang
+            .and_then(|l| highlight::highlight_per_line(&new, l))
+            .unwrap_or_default();
+        compute_hunks(&old, &new, &old_tokens, &new_tokens)
     };
 
     Ok(FileDiff {
@@ -313,13 +336,25 @@ pub fn diff_working(repo_path: &Path, file: &str) -> anyhow::Result<FileDiff> {
     })
 }
 
-fn compute_hunks(old: &[u8], new: &[u8]) -> Vec<DiffHunk> {
+fn compute_hunks(
+    old: &[u8],
+    new: &[u8],
+    old_tokens: &[Vec<HighlightToken>],
+    new_tokens: &[Vec<HighlightToken>],
+) -> Vec<DiffHunk> {
     let input: InternedInput<&[u8]> = InternedInput::new(old, new);
     let diff = gix::diff::blob::Diff::compute(Algorithm::Histogram, &input);
     let context_len: u32 = 3;
     let before_len = input.before.len() as u32;
     let after_len = input.after.len() as u32;
     let mut hunks: Vec<DiffHunk> = Vec::new();
+
+    let pick_old = |line_no: u32| -> Option<Vec<HighlightToken>> {
+        old_tokens.get(line_no.checked_sub(1)? as usize).cloned()
+    };
+    let pick_new = |line_no: u32| -> Option<Vec<HighlightToken>> {
+        new_tokens.get(line_no.checked_sub(1)? as usize).cloned()
+    };
 
     for h in diff.hunks() {
         let pre_old_start = h.before.start.saturating_sub(context_len);
@@ -337,6 +372,7 @@ fn compute_hunks(old: &[u8], new: &[u8]) -> Vec<DiffHunk> {
                 old_line: Some(old_no),
                 new_line: Some(new_no),
                 text: token_text(&input, *tok),
+                tokens: pick_old(old_no),
             });
             old_no += 1;
             new_no += 1;
@@ -348,6 +384,7 @@ fn compute_hunks(old: &[u8], new: &[u8]) -> Vec<DiffHunk> {
                 old_line: Some(old_no),
                 new_line: None,
                 text: token_text(&input, *tok),
+                tokens: pick_old(old_no),
             });
             old_no += 1;
         }
@@ -358,6 +395,7 @@ fn compute_hunks(old: &[u8], new: &[u8]) -> Vec<DiffHunk> {
                 old_line: None,
                 new_line: Some(new_no),
                 text: token_text(&input, *tok),
+                tokens: pick_new(new_no),
             });
             new_no += 1;
         }
@@ -368,6 +406,7 @@ fn compute_hunks(old: &[u8], new: &[u8]) -> Vec<DiffHunk> {
                 old_line: Some(old_no),
                 new_line: Some(new_no),
                 text: token_text(&input, *tok),
+                tokens: pick_old(old_no),
             });
             old_no += 1;
             new_no += 1;
@@ -388,7 +427,7 @@ fn compute_hunks(old: &[u8], new: &[u8]) -> Vec<DiffHunk> {
     hunks
 }
 
-fn token_text(input: &InternedInput<&[u8]>, token: Token) -> String {
+fn token_text(input: &InternedInput<&[u8]>, token: IDToken) -> String {
     let bytes: &[u8] = input.interner[token];
     let trimmed = bytes
         .strip_suffix(b"\n")
