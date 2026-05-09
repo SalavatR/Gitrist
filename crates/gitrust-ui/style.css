@@ -378,13 +378,13 @@ table.log .td-when {
   color: var(--text-2);
 }
 
-.file-diff {
+details.file-diff {
   margin: 0.85rem 0;
   border: 1px solid var(--border);
   border-radius: var(--radius);
   overflow: hidden;
 }
-.file-diff .file-header {
+details.file-diff summary.file-header {
   padding: 0.45rem 0.75rem;
   background: var(--surface-2);
   display: flex;
@@ -393,7 +393,24 @@ table.log .td-when {
   flex-wrap: wrap;
   font-size: 0.85rem;
   border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
 }
+details.file-diff summary.file-header::-webkit-details-marker { display: none; }
+details.file-diff summary.file-header::marker { content: ""; }
+details.file-diff:not([open]) summary.file-header { border-bottom: none; }
+details.file-diff summary.file-header:hover { background: rgba(127, 127, 127, 0.16); }
+.disclosure {
+  display: inline-block;
+  width: 0.85em;
+  text-align: center;
+  font-size: 0.75rem;
+  color: var(--muted);
+  transition: transform 0.12s ease-out;
+}
+.disclosure::before { content: "▸"; }
+details.file-diff[open] .disclosure::before { content: "▾"; }
 .file-diff .file-header .kind {
   font-size: 0.66rem;
   font-weight: 700;

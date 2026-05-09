@@ -523,6 +523,9 @@ fn render_commit_detail(state: &Option<Result<Option<CommitDiff>, String>>) -> E
     }
 }
 
+/// Files with more than this many diff lines start collapsed. Tunable.
+const AUTO_COLLAPSE_LINES: usize = 300;
+
 fn render_file_diff(f: FileDiff) -> Element {
     let path = f.path.clone();
     let kind = f.kind.clone();
@@ -530,8 +533,10 @@ fn render_file_diff(f: FileDiff) -> Element {
     let hunks = f.hunks.clone();
     let mut adds = 0usize;
     let mut dels = 0usize;
+    let mut total_lines = 0usize;
     for h in &hunks {
         for l in &h.lines {
+            total_lines += 1;
             match l.kind.as_str() {
                 "add" => adds += 1,
                 "del" => dels += 1,
@@ -540,9 +545,12 @@ fn render_file_diff(f: FileDiff) -> Element {
         }
     }
     let no_hunks = hunks.is_empty();
+    // Auto-collapse: huge diffs and binary/renamed files.
+    let auto_open = !is_binary && !no_hunks && total_lines <= AUTO_COLLAPSE_LINES;
     rsx! {
-        div { class: "file-diff",
-            div { class: "file-header",
+        details { class: "file-diff", open: auto_open,
+            summary { class: "file-header",
+                span { class: "disclosure" }
                 span { class: "kind kind-{kind}", "{kind}" }
                 code { class: "path", "{path}" }
                 span { class: "stats",
