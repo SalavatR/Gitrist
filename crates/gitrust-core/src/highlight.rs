@@ -1,15 +1,10 @@
 use std::path::Path;
 use std::sync::OnceLock;
 
-use serde::{Deserialize, Serialize};
 use tree_sitter::Language;
 use tree_sitter_highlight::{HighlightConfiguration, HighlightEvent, Highlighter};
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct Token {
-    pub text: String,
-    pub class: String,
-}
+pub use gitrust_types::Token;
 
 const HIGHLIGHT_NAMES: &[&str] = &[
     "attribute",

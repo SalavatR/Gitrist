@@ -1,128 +1,16 @@
 use dioxus::prelude::*;
-use serde::Deserialize;
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 
-#[derive(Deserialize, Clone, PartialEq, Debug)]
-struct RepoSummary {
-    path: String,
-    git_dir: String,
-    head_ref: Option<String>,
-    head_oid: Option<String>,
-    is_detached: bool,
-}
-
-#[derive(Deserialize, Clone, PartialEq, Debug)]
-struct CommitInfo {
-    oid: String,
-    short_oid: String,
-    summary: String,
-    body: String,
-    parents: Vec<String>,
-    author_name: String,
-    author_email: String,
-    time_unix: i64,
-}
-
-#[derive(Deserialize, Clone, PartialEq, Debug)]
-struct StatusEntry {
-    path: String,
-    kind: String,
-}
-
-#[derive(Deserialize, Clone, PartialEq, Debug)]
-struct BranchInfo {
-    name: String,
-    oid: Option<String>,
-    is_head: bool,
-}
-
-#[derive(Deserialize, Clone, PartialEq, Debug)]
-struct TagInfo {
-    name: String,
-    oid: Option<String>,
-    annotated: bool,
-}
-
-#[derive(Deserialize, Clone, PartialEq, Debug)]
-struct RemoteBranchInfo {
-    name: String,
-    remote: String,
-    oid: Option<String>,
-}
-
-#[derive(Deserialize, Clone, PartialEq, Debug)]
-struct TreeEntry {
-    name: String,
-    path: String,
-    kind: String,
-    oid: String,
-    #[serde(default)]
-    children: Vec<TreeEntry>,
-}
-
-#[derive(Deserialize, Clone, PartialEq, Debug)]
-struct BlobLine {
-    number: u32,
-    text: String,
-    #[serde(default)]
-    tokens: Option<Vec<HToken>>,
-}
-
-#[derive(Deserialize, Clone, PartialEq, Debug)]
-struct BlobView {
-    path: String,
-    oid: String,
-    size: u64,
-    is_binary: bool,
-    lines: Vec<BlobLine>,
-}
+use gitrust_types::{
+    BlobLine, BlobView, BranchInfo, CommitDiff, CommitInfo, DiffHunk, DiffLine, FileDiff,
+    RemoteBranchInfo, RepoSummary, StatusEntry, TagInfo, Token, TreeEntry,
+};
 
 #[derive(Clone, PartialEq, Debug)]
 struct BlobSelection {
     oid: String,
     path: String,
-}
-
-#[derive(Deserialize, Clone, PartialEq, Debug)]
-struct DiffLine {
-    kind: String,
-    old_line: Option<u32>,
-    new_line: Option<u32>,
-    text: String,
-    #[serde(default)]
-    tokens: Option<Vec<HToken>>,
-}
-
-#[derive(Deserialize, Clone, PartialEq, Debug)]
-struct HToken {
-    text: String,
-    class: String,
-}
-
-#[derive(Deserialize, Clone, PartialEq, Debug)]
-struct DiffHunk {
-    old_start: u32,
-    old_count: u32,
-    new_start: u32,
-    new_count: u32,
-    lines: Vec<DiffLine>,
-}
-
-#[derive(Deserialize, Clone, PartialEq, Debug)]
-struct FileDiff {
-    path: String,
-    #[serde(default)]
-    old_path: Option<String>,
-    kind: String,
-    is_binary: bool,
-    hunks: Vec<DiffHunk>,
-}
-
-#[derive(Deserialize, Clone, PartialEq, Debug)]
-struct CommitDiff {
-    commit: CommitInfo,
-    files: Vec<FileDiff>,
 }
 
 const DEFAULT_REPO: &str = "/home/salavat/gitrust";
@@ -1130,7 +1018,7 @@ fn render_sbs_row(row: SbsRow) -> Element {
     }
 }
 
-fn render_line_content(tokens: &Option<Vec<HToken>>, plain: &str) -> Element {
+fn render_line_content(tokens: &Option<Vec<Token>>, plain: &str) -> Element {
     match tokens {
         Some(toks) if !toks.is_empty() => {
             let toks = toks.clone();

@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+gitrust-types = { workspace = true }
 dioxus = { workspace = true }
 serde = { workspace = true }
 time = { version = "0.3", default-features = false, features = ["formatting"] }

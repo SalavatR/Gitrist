@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
+    "crates/gitrust-types",
     "crates/gitrust-core",
     "crates/gitrust-server",
     "crates/gitrust-ui",
@@ -8,6 +9,7 @@ members = [
     "crates/gitrust",
 ]
 default-members = [
+    "crates/gitrust-types",
     "crates/gitrust-core",
     "crates/gitrust-server",
     "crates/gitrust-ui",
@@ -21,6 +23,7 @@ license = "MIT OR Apache-2.0"
 repository = "https://github.com/salavat/gitrust"
 
 [workspace.dependencies]
+gitrust-types = { path = "crates/gitrust-types" }
 gitrust-core = { path = "crates/gitrust-core" }
 gitrust-server = { path = "crates/gitrust-server" }
 gitrust-ui = { path = "crates/gitrust-ui" }

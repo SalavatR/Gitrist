@@ -4,123 +4,11 @@ use std::path::Path;
 
 use gix::bstr::ByteSlice;
 use gix::diff::blob::{Algorithm, InternedInput, Token as IDToken};
-use serde::{Deserialize, Serialize};
 
-pub use highlight::Token as HighlightToken;
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RepoSummary {
-    pub path: String,
-    pub git_dir: String,
-    pub head_ref: Option<String>,
-    pub head_oid: Option<String>,
-    pub is_detached: bool,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CommitInfo {
-    pub oid: String,
-    pub short_oid: String,
-    pub summary: String,
-    pub body: String,
-    pub parents: Vec<String>,
-    pub author_name: String,
-    pub author_email: String,
-    pub time_unix: i64,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct StatusEntry {
-    pub path: String,
-    pub kind: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct BranchInfo {
-    pub name: String,
-    pub oid: Option<String>,
-    pub is_head: bool,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TagInfo {
-    pub name: String,
-    pub oid: Option<String>,
-    pub annotated: bool,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RemoteBranchInfo {
-    pub name: String,   // "origin/main"
-    pub remote: String, // "origin"
-    pub oid: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TreeEntry {
-    pub name: String,
-    pub path: String,
-    pub kind: String, // "tree" | "blob" | "symlink" | "submodule"
-    pub oid: String,
-    #[serde(skip_serializing_if = "Vec::is_empty", default)]
-    pub children: Vec<TreeEntry>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct BlobLine {
-    pub number: u32,
-    pub text: String,
-    #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub tokens: Option<Vec<HighlightToken>>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct BlobView {
-    pub path: String,
-    pub oid: String,
-    pub size: u64,
-    pub is_binary: bool,
-    pub lines: Vec<BlobLine>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DiffLine {
-    pub kind: String, // "ctx" | "add" | "del"
-    pub old_line: Option<u32>,
-    pub new_line: Option<u32>,
-    pub text: String,
-    /// Per-token syntax highlighting for `text`. `None` when the language
-    /// isn't recognised (or the file is binary). When present, the token
-    /// texts concatenate to `text`.
-    #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub tokens: Option<Vec<HighlightToken>>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DiffHunk {
-    pub old_start: u32,
-    pub old_count: u32,
-    pub new_start: u32,
-    pub new_count: u32,
-    pub lines: Vec<DiffLine>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct FileDiff {
-    pub path: String,
-    /// Previous path for `renamed` / `copied` files; `None` otherwise.
-    #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub old_path: Option<String>,
-    pub kind: String, // "added" | "deleted" | "modified" | "renamed" | "copied"
-    pub is_binary: bool,
-    pub hunks: Vec<DiffHunk>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CommitDiff {
-    pub commit: CommitInfo,
-    pub files: Vec<FileDiff>,
-}
+pub use gitrust_types::{
+    BlobLine, BlobView, BranchInfo, CommitDiff, CommitInfo, DiffHunk, DiffLine, FileDiff,
+    RemoteBranchInfo, RepoSummary, StatusEntry, TagInfo, Token, TreeEntry,
+};
 
 fn build_commit_info(repo: &gix::Repository, oid: gix::ObjectId) -> anyhow::Result<CommitInfo> {
     let oid_str = oid.to_string();
@@ -351,7 +239,7 @@ pub fn show_blob(repo_path: &Path, oid: &str, file: &str) -> anyhow::Result<Blob
         Vec::new()
     } else {
         let lang = highlight::detect_language(file);
-        let token_lines: Vec<Vec<HighlightToken>> = lang
+        let token_lines: Vec<Vec<Token>> = lang
             .and_then(|l| highlight::highlight_per_line(&bytes, l))
             .unwrap_or_default();
 
@@ -555,8 +443,8 @@ pub fn diff_working(repo_path: &Path, file: &str) -> anyhow::Result<FileDiff> {
 fn compute_hunks(
     old: &[u8],
     new: &[u8],
-    old_tokens: &[Vec<HighlightToken>],
-    new_tokens: &[Vec<HighlightToken>],
+    old_tokens: &[Vec<Token>],
+    new_tokens: &[Vec<Token>],
 ) -> Vec<DiffHunk> {
     let input: InternedInput<&[u8]> = InternedInput::new(old, new);
     let diff = gix::diff::blob::Diff::compute(Algorithm::Histogram, &input);
@@ -564,10 +452,10 @@ fn compute_hunks(
     let before_len = input.before.len() as u32;
     let after_len = input.after.len() as u32;
 
-    let pick_old = |line_no: u32| -> Option<Vec<HighlightToken>> {
+    let pick_old = |line_no: u32| -> Option<Vec<Token>> {
         old_tokens.get(line_no.checked_sub(1)? as usize).cloned()
     };
-    let pick_new = |line_no: u32| -> Option<Vec<HighlightToken>> {
+    let pick_new = |line_no: u32| -> Option<Vec<Token>> {
         new_tokens.get(line_no.checked_sub(1)? as usize).cloned()
     };
 
