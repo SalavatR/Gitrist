@@ -82,6 +82,8 @@ const DEFAULT_REPO: &str = "/home/salavat/gitrust";
 const LOG_LIMIT: usize = 50;
 #[cfg(target_arch = "wasm32")]
 const REPO_STORAGE_KEY: &str = "gitrust.repo";
+#[cfg(target_arch = "wasm32")]
+const VIEW_MODE_STORAGE_KEY: &str = "gitrust.view_mode";
 
 #[component]
 pub fn App() -> Element {
@@ -90,10 +92,15 @@ pub fn App() -> Element {
     let mut draft_repo = use_signal(|| initial.clone());
     let selected_oid = use_signal(|| None::<String>);
     let selected_file = use_signal(|| None::<String>);
+    let mut side_by_side = use_signal(initial_side_by_side);
 
     use_effect(move || {
         let path = current_repo.read().clone();
         persist_repo(&path);
+    });
+    use_effect(move || {
+        let sbs = *side_by_side.read();
+        persist_side_by_side(sbs);
     });
 
     let summary = use_resource(move || {
@@ -187,15 +194,26 @@ pub fn App() -> Element {
                     }
 
                     section { class: "main-block",
-                        h2 {
-                            if selected_file.read().is_some() { "Working tree change" }
-                            else { "Commit detail" }
+                        div { class: "block-toolbar",
+                            h2 { style: "margin: 0;",
+                                if selected_file.read().is_some() { "Working tree change" }
+                                else { "Commit detail" }
+                            }
+                            button {
+                                class: "view-toggle",
+                                onclick: move |_| {
+                                    let cur = *side_by_side.read();
+                                    side_by_side.set(!cur);
+                                },
+                                if *side_by_side.read() { "Unified" } else { "Side-by-side" }
+                            }
                         }
                         {render_detail(
                             &diff.read_unchecked(),
                             &working_diff.read_unchecked(),
                             selected_oid,
                             selected_file,
+                            *side_by_side.read(),
                         )}
                     }
                 }
@@ -434,12 +452,13 @@ fn render_detail(
     working_state: &Option<Result<Option<FileDiff>, String>>,
     selected_oid: Signal<Option<String>>,
     selected_file: Signal<Option<String>>,
+    side_by_side: bool,
 ) -> Element {
     if let Some(file) = selected_file.read().clone() {
-        return render_working_detail(working_state, &file);
+        return render_working_detail(working_state, &file, side_by_side);
     }
     if selected_oid.read().is_some() {
-        return render_commit_detail(commit_state);
+        return render_commit_detail(commit_state, side_by_side);
     }
     rsx! { p { class: "muted", "Select a commit or status entry to inspect." } }
 }
@@ -447,6 +466,7 @@ fn render_detail(
 fn render_working_detail(
     state: &Option<Result<Option<FileDiff>, String>>,
     file: &str,
+    side_by_side: bool,
 ) -> Element {
     match state {
         Some(Ok(Some(f))) => {
@@ -462,7 +482,7 @@ fn render_working_detail(
                     }
                     div { class: "meta", "Working tree vs index" }
                 }
-                {render_file_diff(f_clone)}
+                {render_file_diff(f_clone, side_by_side)}
             }
         }
         Some(Ok(None)) | None => rsx! { p { class: "muted", "Loading…" } },
@@ -473,7 +493,10 @@ fn render_working_detail(
     }
 }
 
-fn render_commit_detail(state: &Option<Result<Option<CommitDiff>, String>>) -> Element {
+fn render_commit_detail(
+    state: &Option<Result<Option<CommitDiff>, String>>,
+    side_by_side: bool,
+) -> Element {
     match state {
         Some(Ok(Some(d))) => {
             let body = d.commit.body.clone();
@@ -513,7 +536,7 @@ fn render_commit_detail(state: &Option<Result<Option<CommitDiff>, String>>) -> E
                     p { class: "muted", "No file changes." }
                 }
                 for f in files {
-                    {render_file_diff(f)}
+                    {render_file_diff(f, side_by_side)}
                 }
             }
         }
@@ -528,7 +551,7 @@ fn render_commit_detail(state: &Option<Result<Option<CommitDiff>, String>>) -> E
 /// Files with more than this many diff lines start collapsed. Tunable.
 const AUTO_COLLAPSE_LINES: usize = 300;
 
-fn render_file_diff(f: FileDiff) -> Element {
+fn render_file_diff(f: FileDiff, side_by_side: bool) -> Element {
     let path = f.path.clone();
     let old_path = f.old_path.clone();
     let kind = f.kind.clone();
@@ -572,7 +595,7 @@ fn render_file_diff(f: FileDiff) -> Element {
                 div { class: "binary-note", "No textual changes." }
             } else {
                 for h in hunks {
-                    {render_hunk(h)}
+                    {if side_by_side { render_hunk_sbs(h) } else { render_hunk(h) }}
                 }
             }
         }
@@ -593,6 +616,152 @@ fn render_hunk(h: DiffHunk) -> Element {
                     {render_diff_line(l)}
                 }
             }
+        }
+    }
+}
+
+fn render_hunk_sbs(h: DiffHunk) -> Element {
+    let header = format!(
+        "@@ -{},{} +{},{} @@",
+        h.old_start, h.old_count, h.new_start, h.new_count
+    );
+    let rows = pair_sbs_rows(h.lines);
+    rsx! {
+        div { class: "hunk",
+            div { class: "hunk-header", "{header}" }
+            div { class: "hunk-sbs",
+                for row in rows {
+                    {render_sbs_row(row)}
+                }
+            }
+        }
+    }
+}
+
+#[derive(Clone)]
+enum SbsRow {
+    Ctx(DiffLine),
+    Pair(DiffLine, DiffLine),
+    OnlyDel(DiffLine),
+    OnlyAdd(DiffLine),
+}
+
+fn pair_sbs_rows(lines: Vec<DiffLine>) -> Vec<SbsRow> {
+    let mut out = Vec::with_capacity(lines.len());
+    let mut dels: Vec<DiffLine> = Vec::new();
+    let mut adds: Vec<DiffLine> = Vec::new();
+
+    let flush = |out: &mut Vec<SbsRow>, dels: &mut Vec<DiffLine>, adds: &mut Vec<DiffLine>| {
+        let dv = std::mem::take(dels);
+        let av = std::mem::take(adds);
+        let pairs = dv.len().min(av.len());
+        let mut di = dv.into_iter();
+        let mut ai = av.into_iter();
+        for _ in 0..pairs {
+            out.push(SbsRow::Pair(di.next().unwrap(), ai.next().unwrap()));
+        }
+        for d in di {
+            out.push(SbsRow::OnlyDel(d));
+        }
+        for a in ai {
+            out.push(SbsRow::OnlyAdd(a));
+        }
+    };
+
+    for line in lines {
+        match line.kind.as_str() {
+            "ctx" => {
+                flush(&mut out, &mut dels, &mut adds);
+                out.push(SbsRow::Ctx(line));
+            }
+            "del" => {
+                if !adds.is_empty() {
+                    flush(&mut out, &mut dels, &mut adds);
+                }
+                dels.push(line);
+            }
+            "add" => adds.push(line),
+            _ => {}
+        }
+    }
+    flush(&mut out, &mut dels, &mut adds);
+    out
+}
+
+fn render_sbs_row(row: SbsRow) -> Element {
+    match row {
+        SbsRow::Ctx(l) => {
+            let old_n = l.old_line.map(|n| n.to_string()).unwrap_or_default();
+            let new_n = l.new_line.map(|n| n.to_string()).unwrap_or_default();
+            let tokens = l.tokens.clone();
+            let plain = l.text.clone();
+            rsx! {
+                div { class: "sbs-row sbs-ctx",
+                    span { class: "ln", "{old_n}" }
+                    span { class: "txt", {render_line_content(&tokens, &plain)} }
+                    span { class: "ln", "{new_n}" }
+                    span { class: "txt", {render_line_content(&tokens, &plain)} }
+                }
+            }
+        }
+        SbsRow::Pair(d, a) => {
+            let old_n = d.old_line.map(|n| n.to_string()).unwrap_or_default();
+            let new_n = a.new_line.map(|n| n.to_string()).unwrap_or_default();
+            let d_tokens = d.tokens.clone();
+            let a_tokens = a.tokens.clone();
+            let d_plain = d.text.clone();
+            let a_plain = a.text.clone();
+            rsx! {
+                div { class: "sbs-row sbs-mod",
+                    span { class: "ln ln-del", "{old_n}" }
+                    span { class: "txt txt-del", {render_line_content(&d_tokens, &d_plain)} }
+                    span { class: "ln ln-add", "{new_n}" }
+                    span { class: "txt txt-add", {render_line_content(&a_tokens, &a_plain)} }
+                }
+            }
+        }
+        SbsRow::OnlyDel(d) => {
+            let old_n = d.old_line.map(|n| n.to_string()).unwrap_or_default();
+            let tokens = d.tokens.clone();
+            let plain = d.text.clone();
+            rsx! {
+                div { class: "sbs-row sbs-del",
+                    span { class: "ln ln-del", "{old_n}" }
+                    span { class: "txt txt-del", {render_line_content(&tokens, &plain)} }
+                    span { class: "ln empty", "" }
+                    span { class: "txt empty", "" }
+                }
+            }
+        }
+        SbsRow::OnlyAdd(a) => {
+            let new_n = a.new_line.map(|n| n.to_string()).unwrap_or_default();
+            let tokens = a.tokens.clone();
+            let plain = a.text.clone();
+            rsx! {
+                div { class: "sbs-row sbs-add",
+                    span { class: "ln empty", "" }
+                    span { class: "txt empty", "" }
+                    span { class: "ln ln-add", "{new_n}" }
+                    span { class: "txt txt-add", {render_line_content(&tokens, &plain)} }
+                }
+            }
+        }
+    }
+}
+
+fn render_line_content(tokens: &Option<Vec<HToken>>, plain: &str) -> Element {
+    match tokens {
+        Some(toks) if !toks.is_empty() => {
+            let toks = toks.clone();
+            rsx! {
+                for t in toks {
+                    span { class: "tok tok-{token_class_to_css(&t.class)}", "{t.text}" }
+                }
+            }
+        }
+        _ => {
+            let plain_owned = plain.to_string();
+            rsx! { "{plain_owned}" }
         }
     }
 }
@@ -685,6 +854,30 @@ fn persist_repo(path: &str) {
 
 #[cfg(not(target_arch = "wasm32"))]
 fn persist_repo(_path: &str) {}
+
+#[cfg(target_arch = "wasm32")]
+fn initial_side_by_side() -> bool {
+    use gloo_storage::Storage;
+    gloo_storage::LocalStorage::get::<String>(VIEW_MODE_STORAGE_KEY)
+        .ok()
+        .map(|s| s == "side")
+        .unwrap_or(false)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn initial_side_by_side() -> bool {
+    false
+}
+
+#[cfg(target_arch = "wasm32")]
+fn persist_side_by_side(side_by_side: bool) {
+    use gloo_storage::Storage;
+    let val = if side_by_side { "side" } else { "unified" };
+    let _ = gloo_storage::LocalStorage::set(VIEW_MODE_STORAGE_KEY, val);
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn persist_side_by_side(_side_by_side: bool) {}
 
 fn format_time(unix: i64) -> String {
     OffsetDateTime::from_unix_timestamp(unix)
