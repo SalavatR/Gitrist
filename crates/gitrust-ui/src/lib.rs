@@ -94,74 +94,81 @@ pub fn App() -> Element {
 
     rsx! {
         style { {include_str!("../style.css")} }
-        h1 { "gitrust" }
-        p { class: "lede",
-            "Self-hosted Rust GUI git client. The page is "
-            code { "gitrust-ui" }
-            " compiled to WebAssembly, served by "
-            code { "gitrust-server" }
-            "."
-        }
-
-        form {
-            class: "repo-picker",
-            onsubmit: move |e| {
-                e.prevent_default();
-                current_repo.set(draft_repo.read().clone());
-            },
-            label { r#for: "repo-input", "Repository path:" }
-            input {
-                id: "repo-input",
-                value: "{draft_repo}",
-                spellcheck: "false",
-                autocapitalize: "off",
-                autocomplete: "off",
-                oninput: move |e| draft_repo.set(e.value()),
+        div { class: "app",
+            header { class: "topbar",
+                div { class: "brand",
+                    span { class: "logo-mark", "g" }
+                    span { class: "logo-name", "gitrust" }
+                }
+                form {
+                    class: "repo-picker",
+                    onsubmit: move |e| {
+                        e.prevent_default();
+                        current_repo.set(draft_repo.read().clone());
+                    },
+                    input {
+                        id: "repo-input",
+                        value: "{draft_repo}",
+                        placeholder: "/absolute/path/to/repo",
+                        spellcheck: "false",
+                        autocapitalize: "off",
+                        autocomplete: "off",
+                        oninput: move |e| draft_repo.set(e.value()),
+                    }
+                    button { r#type: "submit", "Load" }
+                }
             }
-            button { r#type: "submit", "Load" }
-        }
 
-        section {
-            h2 { "Summary" }
-            {render_summary(&summary.read_unchecked())}
-        }
+            div { class: "split",
+                aside { class: "sidebar",
+                    section { class: "side-block",
+                        div { class: "side-title",
+                            span { "Branches" }
+                            {render_branch_count(&branches.read_unchecked())}
+                        }
+                        {render_branches(&branches.read_unchecked())}
+                    }
+                    section { class: "side-block",
+                        div { class: "side-title",
+                            span { "Working tree" }
+                            {render_status_count(&status.read_unchecked())}
+                        }
+                        {render_status(&status.read_unchecked())}
+                    }
+                }
 
-        section {
-            h2 { "Branches" }
-            {render_branches(&branches.read_unchecked())}
-        }
+                main { class: "main",
+                    {render_summary_card(&summary.read_unchecked())}
 
-        section {
-            h2 { "Working tree" }
-            {render_status(&status.read_unchecked())}
-        }
+                    section { class: "main-block",
+                        h2 { "History" }
+                        {render_log(&log.read_unchecked(), selected_oid)}
+                    }
 
-        section {
-            h2 { "Recent commits" }
-            {render_log(&log.read_unchecked(), selected_oid)}
-        }
+                    section { class: "main-block",
+                        h2 { "Commit detail" }
+                        {render_diff(&diff.read_unchecked(), selected_oid)}
+                    }
+                }
+            }
 
-        section {
-            h2 { "Commit detail" }
-            {render_diff(&diff.read_unchecked(), selected_oid)}
-        }
-
-        p { class: "links",
-            "Raw API: "
-            a { href: "/api/health", target: "_blank", "health" }
-            " · "
-            a { href: "/api/repo/summary?path={current_repo}", target: "_blank", "summary" }
-            " · "
-            a { href: "/api/repo/log?path={current_repo}&limit={LOG_LIMIT}", target: "_blank", "log" }
-            " · "
-            a { href: "/api/repo/status?path={current_repo}", target: "_blank", "status" }
-            " · "
-            a { href: "/api/repo/branches?path={current_repo}", target: "_blank", "branches" }
+            footer { class: "footbar",
+                "API · "
+                a { href: "/api/health", target: "_blank", "health" }
+                " · "
+                a { href: "/api/repo/summary?path={current_repo}", target: "_blank", "summary" }
+                " · "
+                a { href: "/api/repo/log?path={current_repo}&limit={LOG_LIMIT}", target: "_blank", "log" }
+                " · "
+                a { href: "/api/repo/status?path={current_repo}", target: "_blank", "status" }
+                " · "
+                a { href: "/api/repo/branches?path={current_repo}", target: "_blank", "branches" }
+            }
         }
     }
 }
 
-fn render_summary(state: &Option<Result<RepoSummary, String>>) -> Element {
+fn render_summary_card(state: &Option<Result<RepoSummary, String>>) -> Element {
     match state {
         Some(Ok(s)) => {
             let branch = s.head_ref.as_deref().unwrap_or("(detached)").to_string();
@@ -171,21 +178,116 @@ fn render_summary(state: &Option<Result<RepoSummary, String>>) -> Element {
                 .map(|o| o.chars().take(12).collect::<String>())
                 .unwrap_or_else(|| "(none)".to_string());
             let path = s.path.clone();
-            let git_dir = s.git_dir.clone();
             rsx! {
-                table { class: "kv",
-                    tr { td { "path" }    td { code { "{path}" } } }
-                    tr { td { "git dir" } td { code { "{git_dir}" } } }
-                    tr { td { "branch" }  td { code { "{branch}" } } }
-                    tr { td { "head" }    td { code { "{oid_short}" } } }
+                section { class: "summary-card",
+                    div { class: "sc-path", code { "{path}" } }
+                    div { class: "sc-head",
+                        span { class: "sc-branch", "{branch}" }
+                        span { class: "sc-oid", code { "{oid_short}" } }
+                    }
                 }
             }
         }
         Some(Err(e)) => {
             let msg = e.clone();
-            rsx! { p { class: "err", "Error: {msg}" } }
+            rsx! { section { class: "summary-card error", "Error: {msg}" } }
         }
-        None => rsx! { p { class: "muted", "Loading…" } },
+        None => rsx! { section { class: "summary-card muted", "Loading…" } },
+    }
+}
+
+fn render_branch_count(state: &Option<Result<Vec<BranchInfo>, String>>) -> Element {
+    if let Some(Ok(bs)) = state {
+        let n = bs.len();
+        rsx! { span { class: "count", "{n}" } }
+    } else {
+        rsx! {}
+    }
+}
+
+fn render_status_count(state: &Option<Result<Vec<StatusEntry>, String>>) -> Element {
+    if let Some(Ok(s)) = state {
+        let n = s.len();
+        if n == 0 {
+            rsx! { span { class: "count clean", "clean" } }
+        } else {
+            rsx! { span { class: "count", "{n}" } }
+        }
+    } else {
+        rsx! {}
+    }
+}
+
+fn render_branches(state: &Option<Result<Vec<BranchInfo>, String>>) -> Element {
+    match state {
+        Some(Ok(branches)) if branches.is_empty() => {
+            rsx! { p { class: "muted small", "No local branches." } }
+        }
+        Some(Ok(branches)) => {
+            let rows = branches.clone();
+            rsx! {
+                ul { class: "branch-list",
+                    for b in rows {
+                        li { key: "{b.name}", class: if b.is_head { "head" } else { "" },
+                            span { class: "marker", if b.is_head { "●" } else { "○" } }
+                            span { class: "name", "{b.name}" }
+                            span { class: "oid",
+                                {
+                                    b.oid
+                                        .as_ref()
+                                        .map(|o| o.chars().take(7).collect::<String>())
+                                        .unwrap_or_else(|| "—".to_string())
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Some(Err(e)) => {
+            let msg = e.clone();
+            rsx! { p { class: "err small", "Error: {msg}" } }
+        }
+        None => rsx! { p { class: "muted small", "Loading…" } },
+    }
+}
+
+fn render_status(state: &Option<Result<Vec<StatusEntry>, String>>) -> Element {
+    match state {
+        Some(Ok(entries)) if entries.is_empty() => {
+            rsx! { p { class: "muted small", "Working tree is clean." } }
+        }
+        Some(Ok(entries)) => {
+            let rows = entries.clone();
+            rsx! {
+                ul { class: "status-list",
+                    for e in rows {
+                        li { key: "{e.path}",
+                            span { class: "badge badge-{e.kind}", title: "{e.kind}",
+                                {status_glyph(&e.kind)}
+                            }
+                            span { class: "path", "{e.path}" }
+                        }
+                    }
+                }
+            }
+        }
+        Some(Err(e)) => {
+            let msg = e.clone();
+            rsx! { p { class: "err small", "Error: {msg}" } }
+        }
+        None => rsx! { p { class: "muted small", "Loading…" } },
+    }
+}
+
+fn status_glyph(kind: &str) -> &'static str {
+    match kind {
+        "modified" => "M",
+        "added" => "A",
+        "untracked" => "?",
+        "conflict" => "!",
+        "deleted" => "D",
+        _ => "•",
     }
 }
 
@@ -203,10 +305,10 @@ fn render_log(
                 table { class: "log",
                     thead {
                         tr {
-                            th { "commit" }
-                            th { "author" }
-                            th { "message" }
-                            th { "when" }
+                            th { class: "th-oid", "commit" }
+                            th { class: "th-author", "author" }
+                            th { class: "th-msg", "message" }
+                            th { class: "th-when", "when" }
                         }
                     }
                     tbody {
@@ -241,77 +343,11 @@ fn render_commit_row(c: CommitInfo, mut selected_oid: Signal<Option<String>>) ->
                     selected_oid.set(Some(target));
                 }
             },
-            td { code { "{c.short_oid}" } }
-            td { class: "author", "{c.author_name}" }
-            td { class: "summary-cell", "{c.summary}" }
-            td { class: "when", title: "{c.time_unix}", "{format_time(c.time_unix)}" }
+            td { class: "td-oid", code { "{c.short_oid}" } }
+            td { class: "td-author", "{c.author_name}" }
+            td { class: "td-msg", "{c.summary}" }
+            td { class: "td-when", title: "{c.time_unix}", "{format_time(c.time_unix)}" }
         }
-    }
-}
-
-fn render_branches(state: &Option<Result<Vec<BranchInfo>, String>>) -> Element {
-    match state {
-        Some(Ok(branches)) if branches.is_empty() => {
-            rsx! { p { class: "muted", "No local branches." } }
-        }
-        Some(Ok(branches)) => {
-            let rows = branches.clone();
-            rsx! {
-                table { class: "branches",
-                    tbody {
-                        for b in rows {
-                            tr { key: "{b.name}", class: if b.is_head { "head" } else { "" },
-                                td { class: "marker", if b.is_head { "●" } else { "" } }
-                                td { class: "name", "{b.name}" }
-                                td { class: "oid",
-                                    code {
-                                        {
-                                            b.oid
-                                                .as_ref()
-                                                .map(|o| o.chars().take(12).collect::<String>())
-                                                .unwrap_or_else(|| "(none)".to_string())
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        Some(Err(e)) => {
-            let msg = e.clone();
-            rsx! { p { class: "err", "Error: {msg}" } }
-        }
-        None => rsx! { p { class: "muted", "Loading…" } },
-    }
-}
-
-fn render_status(state: &Option<Result<Vec<StatusEntry>, String>>) -> Element {
-    match state {
-        Some(Ok(entries)) if entries.is_empty() => {
-            rsx! { p { class: "muted", "Working tree is clean." } }
-        }
-        Some(Ok(entries)) => {
-            let rows = entries.clone();
-            rsx! {
-                table { class: "status",
-                    tbody {
-                        for e in rows {
-                            tr { key: "{e.path}",
-                                td { class: "kind kind-{e.kind}", "{e.kind}" }
-                                td { class: "path", code { "{e.path}" } }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        Some(Err(e)) => {
-            let msg = e.clone();
-            rsx! { p { class: "err", "Error: {msg}" } }
-        }
-        None => rsx! { p { class: "muted", "Loading…" } },
     }
 }
 
@@ -320,7 +356,7 @@ fn render_diff(
     selected_oid: Signal<Option<String>>,
 ) -> Element {
     if selected_oid.read().is_none() {
-        return rsx! { p { class: "muted", "Click a commit row above to inspect its diff." } };
+        return rsx! { p { class: "muted", "Select a commit above to inspect its diff." } };
     }
     match state {
         Some(Ok(Some(d))) => {
@@ -341,13 +377,13 @@ fn render_diff(
             let no_files = files.is_empty();
             rsx! {
                 div { class: "diff-header",
-                    div { class: "title", strong { "{summary}" } }
+                    div { class: "title", "{summary}" }
                     div { class: "meta",
-                        code { "{oid}" }
+                        code { class: "full-oid", "{oid}" }
                         " · "
-                        "{author}"
+                        span { "{author}" }
                         " · "
-                        "{when}"
+                        span { "{when}" }
                         if has_parents {
                             " · parents "
                             code { "{parents_short}" }
@@ -385,7 +421,11 @@ fn render_file_diff(f: FileDiff) -> Element {
             div { class: "file-header",
                 span { class: "kind kind-{kind}", "{kind}" }
                 code { class: "path", "{path}" }
-                span { class: "stats", "+{adds} −{dels}" }
+                span { class: "stats",
+                    span { class: "add-stat", "+{adds}" }
+                    " "
+                    span { class: "del-stat", "−{dels}" }
+                }
             }
             if !no_lines {
                 pre { class: "lines",
