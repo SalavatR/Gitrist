@@ -67,7 +67,10 @@ pub struct DiffHunk {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FileDiff {
     pub path: String,
-    pub kind: String, // "added" | "deleted" | "modified" | "renamed"
+    /// Previous path for `renamed` / `copied` files; `None` otherwise.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub old_path: Option<String>,
+    pub kind: String, // "added" | "deleted" | "modified" | "renamed" | "copied"
     pub is_binary: bool,
     pub hunks: Vec<DiffHunk>,
 }
@@ -207,66 +210,75 @@ pub fn diff_commit(path: &Path, oid: &str) -> anyhow::Result<CommitDiff> {
 
     let mut files: Vec<FileDiff> = Vec::new();
 
-    old_tree
-        .changes()?
+    let mut platform = old_tree.changes()?;
+    platform.options(|opts| {
+        opts.track_rewrites(Some(gix::diff::Rewrites::default()));
+    });
+    platform
         .for_each_to_obtain_tree(&new_tree, |change| -> Result<Action, anyhow::Error> {
-            let entry_mode = match &change {
-                Change::Addition { entry_mode, .. }
-                | Change::Deletion { entry_mode, .. }
-                | Change::Modification { entry_mode, .. } => Some(*entry_mode),
-                Change::Rewrite { .. } => None,
-            };
-            if entry_mode.is_some_and(|m| m.is_tree()) {
-                return Ok(Action::Continue(()));
-            }
-
-            let location = change.location().to_str_lossy().into_owned();
-            let kind: &str = match &change {
-                Change::Addition { .. } => "added",
-                Change::Deletion { .. } => "deleted",
-                Change::Modification { .. } => "modified",
-                Change::Rewrite { .. } => "renamed",
-            };
-
-            let (old_bytes, new_bytes): (Vec<u8>, Vec<u8>) = match &change {
-                Change::Addition { id, .. } => {
+            let file = match &change {
+                Change::Addition { id, entry_mode, .. } if !entry_mode.is_tree() => {
                     let obj = repo.find_object(id.detach())?;
-                    (Vec::new(), obj.data.clone())
+                    Some(make_file_diff(
+                        change.location().to_str_lossy().into_owned(),
+                        None,
+                        "added",
+                        &[],
+                        &obj.data,
+                    ))
                 }
-                Change::Deletion { id, .. } => {
+                Change::Deletion { id, entry_mode, .. } if !entry_mode.is_tree() => {
                     let obj = repo.find_object(id.detach())?;
-                    (obj.data.clone(), Vec::new())
+                    Some(make_file_diff(
+                        change.location().to_str_lossy().into_owned(),
+                        None,
+                        "deleted",
+                        &obj.data,
+                        &[],
+                    ))
                 }
                 Change::Modification {
-                    id, previous_id, ..
-                } => {
+                    id,
+                    previous_id,
+                    entry_mode,
+                    ..
+                } if !entry_mode.is_tree() => {
                     let new_obj = repo.find_object(id.detach())?;
                     let old_obj = repo.find_object(previous_id.detach())?;
-                    (old_obj.data.clone(), new_obj.data.clone())
+                    Some(make_file_diff(
+                        change.location().to_str_lossy().into_owned(),
+                        None,
+                        "modified",
+                        &old_obj.data,
+                        &new_obj.data,
+                    ))
                 }
-                Change::Rewrite { .. } => (Vec::new(), Vec::new()),
+                Change::Rewrite {
+                    source_id,
+                    source_location,
+                    id,
+                    location,
+                    entry_mode,
+                    copy,
+                    ..
+                } if !entry_mode.is_tree() => {
+                    let new_obj = repo.find_object(id.detach())?;
+                    let old_obj = repo.find_object(source_id.detach())?;
+                    let kind = if *copy { "copied" } else { "renamed" };
+                    Some(make_file_diff(
+                        location.to_str_lossy().into_owned(),
+                        Some(source_location.to_str_lossy().into_owned()),
+                        kind,
+                        &old_obj.data,
+                        &new_obj.data,
+                    ))
+                }
+                _ => None,
             };
 
-            let is_binary = is_binary(&old_bytes) || is_binary(&new_bytes);
-            let hunks = if is_binary {
-                Vec::new()
-            } else {
-                let lang = highlight::detect_language(&location);
-                let old_tokens = lang
-                    .and_then(|l| highlight::highlight_per_line(&old_bytes, l))
-                    .unwrap_or_default();
-                let new_tokens = lang
-                    .and_then(|l| highlight::highlight_per_line(&new_bytes, l))
-                    .unwrap_or_default();
-                compute_hunks(&old_bytes, &new_bytes, &old_tokens, &new_tokens)
-            };
-
-            files.push(FileDiff {
-                path: location,
-                kind: kind.into(),
-                is_binary,
-                hunks,
-            });
+            if let Some(fd) = file {
+                files.push(fd);
+            }
             Ok(Action::Continue(()))
         })?;
 
@@ -279,6 +291,35 @@ pub fn diff_commit(path: &Path, oid: &str) -> anyhow::Result<CommitDiff> {
 
 fn is_binary(bytes: &[u8]) -> bool {
     bytes.iter().take(8192).any(|&b| b == 0)
+}
+
+fn make_file_diff(
+    path: String,
+    old_path: Option<String>,
+    kind: &str,
+    old_bytes: &[u8],
+    new_bytes: &[u8],
+) -> FileDiff {
+    let is_binary = is_binary(old_bytes) || is_binary(new_bytes);
+    let hunks = if is_binary {
+        Vec::new()
+    } else {
+        let lang = highlight::detect_language(&path);
+        let old_tokens = lang
+            .and_then(|l| highlight::highlight_per_line(old_bytes, l))
+            .unwrap_or_default();
+        let new_tokens = lang
+            .and_then(|l| highlight::highlight_per_line(new_bytes, l))
+            .unwrap_or_default();
+        compute_hunks(old_bytes, new_bytes, &old_tokens, &new_tokens)
+    };
+    FileDiff {
+        path,
+        old_path,
+        kind: kind.into(),
+        is_binary,
+        hunks,
+    }
 }
 
 pub fn diff_working(repo_path: &Path, file: &str) -> anyhow::Result<FileDiff> {
@@ -314,26 +355,7 @@ pub fn diff_working(repo_path: &Path, file: &str) -> anyhow::Result<FileDiff> {
         }
     };
 
-    let is_binary = is_binary(&old) || is_binary(&new);
-    let hunks = if is_binary {
-        Vec::new()
-    } else {
-        let lang = highlight::detect_language(file);
-        let old_tokens = lang
-            .and_then(|l| highlight::highlight_per_line(&old, l))
-            .unwrap_or_default();
-        let new_tokens = lang
-            .and_then(|l| highlight::highlight_per_line(&new, l))
-            .unwrap_or_default();
-        compute_hunks(&old, &new, &old_tokens, &new_tokens)
-    };
-
-    Ok(FileDiff {
-        path: file.to_string(),
-        kind: kind.into(),
-        is_binary,
-        hunks,
-    })
+    Ok(make_file_diff(file.to_string(), None, kind, &old, &new))
 }
 
 fn compute_hunks(

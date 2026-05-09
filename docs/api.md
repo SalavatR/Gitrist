@@ -178,9 +178,12 @@ curl 'http://127.0.0.1:3737/api/repo/diff?path=/home/me/myrepo&oid=85ea44…'
 }
 ```
 
-- `files[].kind` — `added` | `deleted` | `modified` | `renamed`. Renames
-  carry the `renamed` kind from gix's tree-diff but no `hunks` yet —
-  rename-aware blob diff is on the TODO.
+- `files[].kind` — `added` | `deleted` | `modified` | `renamed` | `copied`.
+  Renames and copies are detected by gix's tree-diff (default 50%
+  similarity threshold) and carry their full hunks against the source
+  blob. The previous path is in `old_path`.
+- `files[].old_path` — present only on `renamed` and `copied` entries.
+  The original path of the file inside the parent commit's tree.
 - `files[].is_binary` — true if either side has a NUL byte in the
   first 8 KiB. Binary files come back with `hunks: []`.
 - `hunks[]` — unified-diff style hunks with three lines of context

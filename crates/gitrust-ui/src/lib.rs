@@ -65,6 +65,8 @@ struct DiffHunk {
 #[derive(Deserialize, Clone, PartialEq, Debug)]
 struct FileDiff {
     path: String,
+    #[serde(default)]
+    old_path: Option<String>,
     kind: String,
     is_binary: bool,
     hunks: Vec<DiffHunk>,
@@ -528,6 +530,7 @@ const AUTO_COLLAPSE_LINES: usize = 300;
 
 fn render_file_diff(f: FileDiff) -> Element {
     let path = f.path.clone();
+    let old_path = f.old_path.clone();
     let kind = f.kind.clone();
     let is_binary = f.is_binary;
     let hunks = f.hunks.clone();
@@ -552,6 +555,10 @@ fn render_file_diff(f: FileDiff) -> Element {
             summary { class: "file-header",
                 span { class: "disclosure" }
                 span { class: "kind kind-{kind}", "{kind}" }
+                if let Some(op) = old_path {
+                    code { class: "path old-path", "{op}" }
+                    span { class: "rename-arrow", "→" }
+                }
                 code { class: "path", "{path}" }
                 span { class: "stats",
                     span { class: "add-stat", "+{adds}" }

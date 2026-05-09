@@ -22,8 +22,11 @@ within each section.
       between index and worktree. UI: status entries in the sidebar
       are clickable; selection drives the same Detail panel that
       shows commit diffs.
-- [ ] Rename-aware blob diff for `Change::Rewrite` (currently
-      reported as `renamed` but `hunks: []`).
+- [x] Rename-aware blob diff for `Change::Rewrite`. Tree-diff is now
+      run with `track_rewrites(Some(Rewrites::default()))`; renamed
+      and copied files carry full hunks against their source blob and
+      a new `FileDiff.old_path` field. UI shows `old → new` in the
+      file header (old path strikethrough'd in muted color).
 - [x] Syntax highlighting via `tree-sitter` + `tree-sitter-highlight`,
       server-side. Tokens travel through the API as
       `DiffLine.tokens: Option<Vec<{text, class}>>`. Languages: rust,
