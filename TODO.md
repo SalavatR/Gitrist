@@ -80,9 +80,12 @@ within each section.
 - [ ] Recent-repos quick-switch list.
 - [ ] Encode current repo path in URL hash so browser back/forward
       and bookmarks work.
-- [ ] Stale-while-revalidate: keep last good response visible during
-      refetch instead of flipping back to "Loading…".
-- [ ] Time column: relative ("3h ago") with full ISO in title.
+- [x] Stale-while-revalidate: mirror Signals shadow the three
+      main-panel resources; clicks on commits/files/blobs hold the
+      previous content visible until the new fetch lands.
+- [x] Time column: relative ("3h ago") in the log; absolute RFC3339
+      goes into the `title` attribute for hover. Detail-panel still
+      shows absolute since you've drilled in for precision.
 - [ ] Error states with a retry button.
 - [ ] Manual light/dark toggle in addition to `color-scheme: light dark`.
 
