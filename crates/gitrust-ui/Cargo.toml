@@ -13,4 +13,5 @@ time = { version = "0.3", default-features = false, features = ["formatting"] }
 gloo-net = "0.6"
 gloo-storage = "0.3"
 gloo-utils = "0.2"
+js-sys = "0.3"
 urlencoding = "2"

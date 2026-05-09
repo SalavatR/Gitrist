@@ -189,6 +189,12 @@ pub fn App() -> Element {
             }
         }
     });
+    let mut blob_view_stale = use_signal(|| None::<Result<Option<BlobView>, String>>);
+    use_effect(move || {
+        if let Some(v) = blob_view.read_unchecked().clone() {
+            blob_view_stale.set(Some(v));
+        }
+    });
     let diff = use_resource(move || {
         let path = current_repo.read().clone();
         let oid = selected_oid.read().clone();
@@ -199,6 +205,13 @@ pub fn App() -> Element {
             }
         }
     });
+    let mut diff_stale = use_signal(|| None::<Result<Option<CommitDiff>, String>>);
+    use_effect(move || {
+        if let Some(v) = diff.read_unchecked().clone() {
+            diff_stale.set(Some(v));
+        }
+    });
+
     let working_diff = use_resource(move || {
         let path = current_repo.read().clone();
         let file = selected_file.read().clone();
@@ -207,6 +220,12 @@ pub fn App() -> Element {
                 Some(f) => fetch_diff_working(&path, &f).await.map(Some),
                 None => Ok::<_, String>(None),
             }
+        }
+    });
+    let mut working_diff_stale = use_signal(|| None::<Result<Option<FileDiff>, String>>);
+    use_effect(move || {
+        if let Some(v) = working_diff.read_unchecked().clone() {
+            working_diff_stale.set(Some(v));
         }
     });
 
@@ -308,9 +327,9 @@ pub fn App() -> Element {
                             }
                         }
                         {render_detail(
-                            &diff.read_unchecked(),
-                            &working_diff.read_unchecked(),
-                            &blob_view.read_unchecked(),
+                            &diff_stale.read_unchecked(),
+                            &working_diff_stale.read_unchecked(),
+                            &blob_view_stale.read_unchecked(),
                             selected_oid,
                             selected_file,
                             selected_blob,
@@ -751,7 +770,7 @@ fn render_commit_row(
             td { class: "td-oid", code { "{c.short_oid}" } }
             td { class: "td-author", "{c.author_name}" }
             td { class: "td-msg", "{c.summary}" }
-            td { class: "td-when", title: "{c.time_unix}", "{format_time(c.time_unix)}" }
+            td { class: "td-when", title: "{format_time(c.time_unix)}", "{format_time_relative(c.time_unix)}" }
         }
     }
 }
@@ -1246,6 +1265,47 @@ fn format_time(unix: i64) -> String {
         .ok()
         .and_then(|dt| dt.format(&Rfc3339).ok())
         .unwrap_or_else(|| unix.to_string())
+}
+
+fn format_time_relative(unix: i64) -> String {
+    let now = now_unix();
+    let delta = now - unix;
+    if delta < 0 {
+        return "in the future".to_string();
+    }
+    if delta < 60 {
+        return "just now".to_string();
+    }
+    if delta < 3600 {
+        return format!("{}m ago", delta / 60);
+    }
+    if delta < 86400 {
+        return format!("{}h ago", delta / 3600);
+    }
+    let days = delta / 86400;
+    if days < 7 {
+        return format!("{}d ago", days);
+    }
+    if days < 30 {
+        return format!("{}w ago", days / 7);
+    }
+    if days < 365 {
+        return format!("{}mo ago", days / 30);
+    }
+    format!("{}y ago", days / 365)
+}
+
+#[cfg(target_arch = "wasm32")]
+fn now_unix() -> i64 {
+    (js_sys::Date::now() / 1000.0) as i64
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn now_unix() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
 }
 
 #[cfg(target_arch = "wasm32")]

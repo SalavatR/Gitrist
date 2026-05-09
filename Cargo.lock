@@ -1455,6 +1455,7 @@ dependencies = [
  "gloo-net",
  "gloo-storage",
  "gloo-utils",
+ "js-sys",
  "serde",
  "time",
  "urlencoding",
