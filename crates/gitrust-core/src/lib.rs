@@ -347,7 +347,6 @@ fn compute_hunks(
     let context_len: u32 = 3;
     let before_len = input.before.len() as u32;
     let after_len = input.after.len() as u32;
-    let mut hunks: Vec<DiffHunk> = Vec::new();
 
     let pick_old = |line_no: u32| -> Option<Vec<HighlightToken>> {
         old_tokens.get(line_no.checked_sub(1)? as usize).cloned()
@@ -356,17 +355,88 @@ fn compute_hunks(
         new_tokens.get(line_no.checked_sub(1)? as usize).cloned()
     };
 
+    // Group adjacent imara hunks whose context windows overlap into one
+    // merged display hunk so we don't emit duplicate context lines.
+    struct Group {
+        old_start: u32,
+        old_end: u32,
+        new_start: u32,
+        new_end: u32,
+        changes: Vec<gix::diff::blob::Hunk>,
+    }
+
+    let mut groups: Vec<Group> = Vec::new();
     for h in diff.hunks() {
-        let pre_old_start = h.before.start.saturating_sub(context_len);
-        let post_old_end = (h.before.end + context_len).min(before_len);
-        let pre_new_start = h.after.start.saturating_sub(context_len);
-        let post_new_end = (h.after.end + context_len).min(after_len);
+        let old_start = h.before.start.saturating_sub(context_len);
+        let old_end = (h.before.end + context_len).min(before_len);
+        let new_start = h.after.start.saturating_sub(context_len);
+        let new_end = (h.after.end + context_len).min(after_len);
 
+        if let Some(last) = groups.last_mut() {
+            if old_start <= last.old_end {
+                last.old_end = last.old_end.max(old_end);
+                last.new_end = last.new_end.max(new_end);
+                last.changes.push(h);
+                continue;
+            }
+        }
+        groups.push(Group {
+            old_start,
+            old_end,
+            new_start,
+            new_end,
+            changes: vec![h],
+        });
+    }
+
+    let mut hunks: Vec<DiffHunk> = Vec::new();
+    for g in groups {
         let mut lines: Vec<DiffLine> = Vec::new();
-        let mut old_no = pre_old_start + 1;
-        let mut new_no = pre_new_start + 1;
+        let mut old_no = g.old_start + 1;
+        let mut new_no = g.new_start + 1;
+        let mut cursor_old = g.old_start;
 
-        for tok in &input.before[pre_old_start as usize..h.before.start as usize] {
+        for change in &g.changes {
+            // Inter-change (or pre-first) context: lines unchanged in both
+            // sides between previous cursor and the start of this change.
+            for tok in &input.before[cursor_old as usize..change.before.start as usize] {
+                lines.push(DiffLine {
+                    kind: "ctx".into(),
+                    old_line: Some(old_no),
+                    new_line: Some(new_no),
+                    text: token_text(&input, *tok),
+                    tokens: pick_old(old_no),
+                });
+                old_no += 1;
+                new_no += 1;
+            }
+            // Removed lines (this change's `before` range).
+            for tok in &input.before[change.before.start as usize..change.before.end as usize] {
+                lines.push(DiffLine {
+                    kind: "del".into(),
+                    old_line: Some(old_no),
+                    new_line: None,
+                    text: token_text(&input, *tok),
+                    tokens: pick_old(old_no),
+                });
+                old_no += 1;
+            }
+            // Added lines (this change's `after` range).
+            for tok in &input.after[change.after.start as usize..change.after.end as usize] {
+                lines.push(DiffLine {
+                    kind: "add".into(),
+                    old_line: None,
+                    new_line: Some(new_no),
+                    text: token_text(&input, *tok),
+                    tokens: pick_new(new_no),
+                });
+                new_no += 1;
+            }
+            cursor_old = change.before.end;
+        }
+
+        // Trailing context lines after the last change.
+        for tok in &input.before[cursor_old as usize..g.old_end as usize] {
             lines.push(DiffLine {
                 kind: "ctx".into(),
                 old_line: Some(old_no),
@@ -378,47 +448,13 @@ fn compute_hunks(
             new_no += 1;
         }
 
-        for tok in &input.before[h.before.start as usize..h.before.end as usize] {
-            lines.push(DiffLine {
-                kind: "del".into(),
-                old_line: Some(old_no),
-                new_line: None,
-                text: token_text(&input, *tok),
-                tokens: pick_old(old_no),
-            });
-            old_no += 1;
-        }
-
-        for tok in &input.after[h.after.start as usize..h.after.end as usize] {
-            lines.push(DiffLine {
-                kind: "add".into(),
-                old_line: None,
-                new_line: Some(new_no),
-                text: token_text(&input, *tok),
-                tokens: pick_new(new_no),
-            });
-            new_no += 1;
-        }
-
-        for tok in &input.before[h.before.end as usize..post_old_end as usize] {
-            lines.push(DiffLine {
-                kind: "ctx".into(),
-                old_line: Some(old_no),
-                new_line: Some(new_no),
-                text: token_text(&input, *tok),
-                tokens: pick_old(old_no),
-            });
-            old_no += 1;
-            new_no += 1;
-        }
-
-        let len_before = post_old_end - pre_old_start;
-        let len_after = post_new_end - pre_new_start;
+        let len_before = g.old_end - g.old_start;
+        let len_after = g.new_end - g.new_start;
 
         hunks.push(DiffHunk {
-            old_start: pre_old_start + 1,
+            old_start: g.old_start + 1,
             old_count: len_before,
-            new_start: pre_new_start + 1,
+            new_start: g.new_start + 1,
             new_count: len_after,
             lines,
         });

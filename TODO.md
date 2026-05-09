@@ -13,9 +13,10 @@ within each section.
 - [x] Per-line numbers for both old and new files (gutter view).
 - [x] Binary file detection (NUL byte in first 8 KiB) → `is_binary:
       true` and `hunks: []`.
-- [ ] Hunk merging when two adjacent hunks' context windows overlap
-      (today they're emitted independently and the redundant context
-      lines repeat).
+- [x] Hunk merging when two adjacent hunks' context windows overlap.
+      Adjacent imara hunks with overlapping `±3` windows are folded
+      into one display hunk; output now matches `git diff -U3` hunk
+      counts on the same commit.
 - [x] `GET /api/repo/diff/working?path=…&file=…` — patch for a
       single working-tree file (modified, untracked, or deleted)
       between index and worktree. UI: status entries in the sidebar
