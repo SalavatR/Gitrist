@@ -78,13 +78,21 @@ struct CommitDiff {
 
 const DEFAULT_REPO: &str = "/home/salavat/gitrust";
 const LOG_LIMIT: usize = 50;
+#[cfg(target_arch = "wasm32")]
+const REPO_STORAGE_KEY: &str = "gitrust.repo";
 
 #[component]
 pub fn App() -> Element {
-    let mut current_repo = use_signal(|| DEFAULT_REPO.to_string());
-    let mut draft_repo = use_signal(|| DEFAULT_REPO.to_string());
+    let initial = initial_repo();
+    let mut current_repo = use_signal(|| initial.clone());
+    let mut draft_repo = use_signal(|| initial.clone());
     let selected_oid = use_signal(|| None::<String>);
     let selected_file = use_signal(|| None::<String>);
+
+    use_effect(move || {
+        let path = current_repo.read().clone();
+        persist_repo(&path);
+    });
 
     let summary = use_resource(move || {
         let path = current_repo.read().clone();
@@ -620,6 +628,48 @@ fn token_class_to_css(class: &str) -> String {
         class.replace('.', "-")
     }
 }
+
+#[cfg(target_arch = "wasm32")]
+fn initial_repo() -> String {
+    use gloo_storage::Storage;
+    let window = gloo_utils::window();
+    if let Ok(hash) = window.location().hash() {
+        if hash.len() > 1 {
+            if let Ok(decoded) = urlencoding::decode(&hash[1..]) {
+                let s = decoded.into_owned();
+                if !s.is_empty() {
+                    return s;
+                }
+            }
+        }
+    }
+    if let Ok(stored) = gloo_storage::LocalStorage::get::<String>(REPO_STORAGE_KEY) {
+        if !stored.is_empty() {
+            return stored;
+        }
+    }
+    DEFAULT_REPO.to_string()
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn initial_repo() -> String {
+    DEFAULT_REPO.to_string()
+}
+
+#[cfg(target_arch = "wasm32")]
+fn persist_repo(path: &str) {
+    use gloo_storage::Storage;
+    if path.is_empty() {
+        return;
+    }
+    let _ = gloo_storage::LocalStorage::set(REPO_STORAGE_KEY, path);
+    let window = gloo_utils::window();
+    let encoded = urlencoding::encode(path);
+    let _ = window.location().set_hash(encoded.as_ref());
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn persist_repo(_path: &str) {}
 
 fn format_time(unix: i64) -> String {
     OffsetDateTime::from_unix_timestamp(unix)
