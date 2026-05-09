@@ -265,6 +265,54 @@ fn is_binary(bytes: &[u8]) -> bool {
     bytes.iter().take(8192).any(|&b| b == 0)
 }
 
+pub fn diff_working(repo_path: &Path, file: &str) -> anyhow::Result<FileDiff> {
+    let repo = gix::open(repo_path)?;
+    let workdir = repo
+        .workdir()
+        .ok_or_else(|| anyhow::anyhow!("bare repository has no working tree"))?;
+    let abs_file = workdir.join(file);
+
+    let worktree_bytes: Option<Vec<u8>> = match std::fs::read(&abs_file) {
+        Ok(b) => Some(b),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+        Err(e) => return Err(e.into()),
+    };
+
+    let index = repo.index_or_empty()?;
+    let path_bstr = gix::bstr::BStr::new(file.as_bytes());
+    let index_bytes: Option<Vec<u8>> = if let Some(entry) = index.entry_by_path(path_bstr) {
+        let obj = repo.find_object(entry.id)?;
+        Some(obj.data.clone())
+    } else {
+        None
+    };
+
+    let (old, new, kind) = match (index_bytes, worktree_bytes) {
+        (Some(idx), Some(wd)) => (idx, wd, "modified"),
+        (None, Some(wd)) => (Vec::new(), wd, "untracked"),
+        (Some(idx), None) => (idx, Vec::new(), "deleted"),
+        (None, None) => {
+            return Err(anyhow::anyhow!(
+                "file not present in index or working tree: {file}"
+            ));
+        }
+    };
+
+    let is_binary = is_binary(&old) || is_binary(&new);
+    let hunks = if is_binary {
+        Vec::new()
+    } else {
+        compute_hunks(&old, &new)
+    };
+
+    Ok(FileDiff {
+        path: file.to_string(),
+        kind: kind.into(),
+        is_binary,
+        hunks,
+    })
+}
+
 fn compute_hunks(old: &[u8], new: &[u8]) -> Vec<DiffHunk> {
     let input: InternedInput<&[u8]> = InternedInput::new(old, new);
     let diff = gix::diff::blob::Diff::compute(Algorithm::Histogram, &input);

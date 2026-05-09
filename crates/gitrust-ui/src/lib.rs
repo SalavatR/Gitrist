@@ -76,6 +76,7 @@ pub fn App() -> Element {
     let mut current_repo = use_signal(|| DEFAULT_REPO.to_string());
     let mut draft_repo = use_signal(|| DEFAULT_REPO.to_string());
     let selected_oid = use_signal(|| None::<String>);
+    let selected_file = use_signal(|| None::<String>);
 
     let summary = use_resource(move || {
         let path = current_repo.read().clone();
@@ -99,6 +100,16 @@ pub fn App() -> Element {
         async move {
             match oid {
                 Some(o) => fetch_diff(&path, &o).await.map(Some),
+                None => Ok::<_, String>(None),
+            }
+        }
+    });
+    let working_diff = use_resource(move || {
+        let path = current_repo.read().clone();
+        let file = selected_file.read().clone();
+        async move {
+            match file {
+                Some(f) => fetch_diff_working(&path, &f).await.map(Some),
                 None => Ok::<_, String>(None),
             }
         }
@@ -145,7 +156,7 @@ pub fn App() -> Element {
                             span { "Working tree" }
                             {render_status_count(&status.read_unchecked())}
                         }
-                        {render_status(&status.read_unchecked())}
+                        {render_status(&status.read_unchecked(), selected_oid, selected_file)}
                     }
                 }
 
@@ -154,12 +165,20 @@ pub fn App() -> Element {
 
                     section { class: "main-block",
                         h2 { "History" }
-                        {render_log(&log.read_unchecked(), selected_oid)}
+                        {render_log(&log.read_unchecked(), selected_oid, selected_file)}
                     }
 
                     section { class: "main-block",
-                        h2 { "Commit detail" }
-                        {render_diff(&diff.read_unchecked(), selected_oid)}
+                        h2 {
+                            if selected_file.read().is_some() { "Working tree change" }
+                            else { "Commit detail" }
+                        }
+                        {render_detail(
+                            &diff.read_unchecked(),
+                            &working_diff.read_unchecked(),
+                            selected_oid,
+                            selected_file,
+                        )}
                     }
                 }
             }
@@ -264,7 +283,11 @@ fn render_branches(state: &Option<Result<Vec<BranchInfo>, String>>) -> Element {
     }
 }
 
-fn render_status(state: &Option<Result<Vec<StatusEntry>, String>>) -> Element {
+fn render_status(
+    state: &Option<Result<Vec<StatusEntry>, String>>,
+    mut selected_oid: Signal<Option<String>>,
+    mut selected_file: Signal<Option<String>>,
+) -> Element {
     match state {
         Some(Ok(entries)) if entries.is_empty() => {
             rsx! { p { class: "muted small", "Working tree is clean." } }
@@ -274,11 +297,30 @@ fn render_status(state: &Option<Result<Vec<StatusEntry>, String>>) -> Element {
             rsx! {
                 ul { class: "status-list",
                     for e in rows {
-                        li { key: "{e.path}",
-                            span { class: "badge badge-{e.kind}", title: "{e.kind}",
-                                {status_glyph(&e.kind)}
+                        {
+                            let path = e.path.clone();
+                            let path_for_class = e.path.clone();
+                            let is_selected = selected_file.read().as_deref() == Some(path_for_class.as_str());
+                            rsx! {
+                                li {
+                                    key: "{e.path}",
+                                    class: if is_selected { "selected" } else { "" },
+                                    onclick: move |_| {
+                                        let target = path.clone();
+                                        let same = selected_file.read().as_deref() == Some(target.as_str());
+                                        if same {
+                                            selected_file.set(None);
+                                        } else {
+                                            selected_file.set(Some(target));
+                                            selected_oid.set(None);
+                                        }
+                                    },
+                                    span { class: "badge badge-{e.kind}", title: "{e.kind}",
+                                        {status_glyph(&e.kind)}
+                                    }
+                                    span { class: "path", "{e.path}" }
+                                }
                             }
-                            span { class: "path", "{e.path}" }
                         }
                     }
                 }
@@ -306,6 +348,7 @@ fn status_glyph(kind: &str) -> &'static str {
 fn render_log(
     state: &Option<Result<Vec<CommitInfo>, String>>,
     selected_oid: Signal<Option<String>>,
+    selected_file: Signal<Option<String>>,
 ) -> Element {
     match state {
         Some(Ok(commits)) if commits.is_empty() => {
@@ -325,7 +368,7 @@ fn render_log(
                     }
                     tbody {
                         for c in rows {
-                            {render_commit_row(c, selected_oid)}
+                            {render_commit_row(c, selected_oid, selected_file)}
                         }
                     }
                 }
@@ -339,7 +382,11 @@ fn render_log(
     }
 }
 
-fn render_commit_row(c: CommitInfo, mut selected_oid: Signal<Option<String>>) -> Element {
+fn render_commit_row(
+    c: CommitInfo,
+    mut selected_oid: Signal<Option<String>>,
+    mut selected_file: Signal<Option<String>>,
+) -> Element {
     let is_selected = selected_oid.read().as_deref() == Some(c.oid.as_str());
     let oid_for_click = c.oid.clone();
     rsx! {
@@ -353,6 +400,7 @@ fn render_commit_row(c: CommitInfo, mut selected_oid: Signal<Option<String>>) ->
                     selected_oid.set(None);
                 } else {
                     selected_oid.set(Some(target));
+                    selected_file.set(None);
                 }
             },
             td { class: "td-oid", code { "{c.short_oid}" } }
@@ -363,13 +411,51 @@ fn render_commit_row(c: CommitInfo, mut selected_oid: Signal<Option<String>>) ->
     }
 }
 
-fn render_diff(
-    state: &Option<Result<Option<CommitDiff>, String>>,
+fn render_detail(
+    commit_state: &Option<Result<Option<CommitDiff>, String>>,
+    working_state: &Option<Result<Option<FileDiff>, String>>,
     selected_oid: Signal<Option<String>>,
+    selected_file: Signal<Option<String>>,
 ) -> Element {
-    if selected_oid.read().is_none() {
-        return rsx! { p { class: "muted", "Select a commit above to inspect its diff." } };
+    if let Some(file) = selected_file.read().clone() {
+        return render_working_detail(working_state, &file);
     }
+    if selected_oid.read().is_some() {
+        return render_commit_detail(commit_state);
+    }
+    rsx! { p { class: "muted", "Select a commit or status entry to inspect." } }
+}
+
+fn render_working_detail(
+    state: &Option<Result<Option<FileDiff>, String>>,
+    file: &str,
+) -> Element {
+    match state {
+        Some(Ok(Some(f))) => {
+            let path = file.to_string();
+            let kind = f.kind.clone();
+            let f_clone = f.clone();
+            rsx! {
+                div { class: "diff-header",
+                    div { class: "title",
+                        span { class: "kind kind-{kind}", "{kind}" }
+                        " "
+                        code { class: "full-oid", "{path}" }
+                    }
+                    div { class: "meta", "Working tree vs index" }
+                }
+                {render_file_diff(f_clone)}
+            }
+        }
+        Some(Ok(None)) | None => rsx! { p { class: "muted", "Loading…" } },
+        Some(Err(e)) => {
+            let msg = e.clone();
+            rsx! { p { class: "err", "Error: {msg}" } }
+        }
+    }
+}
+
+fn render_commit_detail(state: &Option<Result<Option<CommitDiff>, String>>) -> Element {
     match state {
         Some(Ok(Some(d))) => {
             let body = d.commit.body.clone();
@@ -539,6 +625,11 @@ async fn fetch_diff(path: &str, oid: &str) -> Result<CommitDiff, String> {
 }
 
 #[cfg(target_arch = "wasm32")]
+async fn fetch_diff_working(path: &str, file: &str) -> Result<FileDiff, String> {
+    fetch_json(&format!("/api/repo/diff/working?path={path}&file={file}")).await
+}
+
+#[cfg(target_arch = "wasm32")]
 async fn fetch_json<T: serde::de::DeserializeOwned>(url: &str) -> Result<T, String> {
     let resp = gloo_net::http::Request::get(url)
         .send()
@@ -572,5 +663,10 @@ async fn fetch_branches(_path: &str) -> Result<Vec<BranchInfo>, String> {
 
 #[cfg(not(target_arch = "wasm32"))]
 async fn fetch_diff(_path: &str, _oid: &str) -> Result<CommitDiff, String> {
+    Err("native build: fetching not implemented".into())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+async fn fetch_diff_working(_path: &str, _file: &str) -> Result<FileDiff, String> {
     Err("native build: fetching not implemented".into())
 }

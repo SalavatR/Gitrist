@@ -222,7 +222,9 @@ a:hover { text-decoration: underline; }
   font-size: 0.85rem;
   border-radius: var(--radius);
 }
+.status-list li { cursor: pointer; }
 .status-list li:hover { background: var(--surface-2); }
+.status-list li.selected { background: var(--accent-bg); }
 .status-list li .badge {
   width: 1.3em;
   height: 1.3em;

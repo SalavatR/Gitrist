@@ -13,8 +13,8 @@ use tower_http::services::ServeDir;
 use tower_http::trace::TraceLayer;
 
 use gitrust_core::{
-    BranchInfo, CommitDiff, CommitInfo, RepoSummary, StatusEntry, diff_commit, list_branches,
-    list_status, log_commits, summarize_repo,
+    BranchInfo, CommitDiff, CommitInfo, FileDiff, RepoSummary, StatusEntry, diff_commit,
+    diff_working, list_branches, list_status, log_commits, summarize_repo,
 };
 
 #[derive(Serialize)]
@@ -81,6 +81,21 @@ async fn repo_diff(Query(q): Query<DiffQuery>) -> Result<Json<CommitDiff>, ApiEr
     diff_commit(&path, &q.oid).map(Json).map_err(ApiError::from)
 }
 
+#[derive(Deserialize)]
+struct DiffWorkingQuery {
+    path: String,
+    file: String,
+}
+
+async fn repo_diff_working(
+    Query(q): Query<DiffWorkingQuery>,
+) -> Result<Json<FileDiff>, ApiError> {
+    let path = PathBuf::from(q.path);
+    diff_working(&path, &q.file)
+        .map(Json)
+        .map_err(ApiError::from)
+}
+
 struct ApiError(anyhow::Error);
 
 impl From<anyhow::Error> for ApiError {
@@ -103,7 +118,8 @@ pub fn router(web_dist: Option<PathBuf>) -> Router {
         .route("/repo/log", get(repo_log))
         .route("/repo/status", get(repo_status))
         .route("/repo/branches", get(repo_branches))
-        .route("/repo/diff", get(repo_diff));
+        .route("/repo/diff", get(repo_diff))
+        .route("/repo/diff/working", get(repo_diff_working));
 
     let mut app = Router::new().nest("/api", api);
     if let Some(dist) = web_dist {

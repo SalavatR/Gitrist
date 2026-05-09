@@ -16,9 +16,11 @@ within each section.
 - [ ] Hunk merging when two adjacent hunks' context windows overlap
       (today they're emitted independently and the redundant context
       lines repeat).
-- [ ] `GET /api/repo/diff/working?path=…&file=…` — patch for a
-      single working-tree file (modified or untracked); UI shows it
-      inline with the status entry that's clicked.
+- [x] `GET /api/repo/diff/working?path=…&file=…` — patch for a
+      single working-tree file (modified, untracked, or deleted)
+      between index and worktree. UI: status entries in the sidebar
+      are clickable; selection drives the same Detail panel that
+      shows commit diffs.
 - [ ] Rename-aware blob diff for `Change::Rewrite` (currently
       reported as `renamed` but `hunks: []`).
 - [ ] Syntax highlighting via `syntect` or `tree-sitter`.

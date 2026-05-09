@@ -192,3 +192,41 @@ curl 'http://127.0.0.1:3737/api/repo/diff?path=/home/me/myrepo&oid=85ea44…'
 
 Tree-level entries (directories) are filtered from the response;
 only file changes appear.
+
+## `GET /api/repo/diff/working?path=<path>&file=<rel-path>`
+
+Diff of one working-tree file against its index version. Returns the
+same `FileDiff` shape used inside `/api/repo/diff`'s `files[]`, so the
+UI can reuse the same renderer.
+
+```sh
+curl 'http://127.0.0.1:3737/api/repo/diff/working?path=/home/me/myrepo&file=src/main.rs'
+```
+
+```json
+{
+  "path": "src/main.rs",
+  "kind": "modified",
+  "is_binary": false,
+  "hunks": [
+    {
+      "old_start": 10, "old_count": 5,
+      "new_start": 10, "new_count": 7,
+      "lines": [ … ]
+    }
+  ]
+}
+```
+
+`kind` is determined by which sides exist:
+
+- `modified` — file is in the index *and* on disk (and content differs).
+- `untracked` — only on disk; rendered as all-add against the empty
+  index side.
+- `deleted` — in the index but missing from disk.
+- `added` — index entry marked intent-to-add but no committed blob
+  yet; not currently emitted by `list_status` but supported here for
+  symmetry.
+
+Same hunk shape (context lines, line-number gutter, binary
+detection) as the commit diff.
