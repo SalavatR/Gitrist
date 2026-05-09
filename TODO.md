@@ -32,9 +32,10 @@ within each section.
       `DiffLine.tokens: Option<Vec<{text, class}>>`. Languages: rust,
       json, html, css, typescript, tsx, javascript, python, toml, lua.
       Markdown intentionally omitted (split block/inline grammars).
-- [ ] Per-file collapse/expand for very large diffs; lazy load above
-      a threshold.
-- [ ] Side-by-side view as an alternative to the unified gutter.
+- [x] Per-file collapse/expand for very large diffs (auto-collapse
+      above 300 lines, manual via the file-header chevron).
+- [x] Side-by-side view as an alternative to the unified gutter.
+      Toolbar toggle, persisted in `localStorage["gitrust.view_mode"]`.
 
 ## Reads (more history surface)
 
