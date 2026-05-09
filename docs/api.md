@@ -317,7 +317,10 @@ curl 'http://127.0.0.1:3737/api/repo/diff?path=/home/me/myrepo&oid=85ea44…'
   Concatenating `text` over all tokens yields the same content as
   the line's `text` field. Field is omitted when the file extension
   doesn't map to a supported grammar (currently rust, json, html,
-  css, typescript, tsx, javascript, python, toml, lua).
+  css, typescript, tsx, javascript, python, toml, lua, markdown).
+  Markdown is block-only for now: headings, lists and fenced code
+  blocks are tokenised; inline `code`, *emphasis* and **strong**
+  aren't surfaced — pending a manual two-grammar merge.
 
 Tree-level entries (directories) are filtered from the response;
 only file changes appear.
