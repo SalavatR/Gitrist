@@ -57,6 +57,16 @@ pub struct RemoteBranchInfo {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TreeEntry {
+    pub name: String,
+    pub path: String,
+    pub kind: String, // "tree" | "blob" | "symlink" | "submodule"
+    pub oid: String,
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub children: Vec<TreeEntry>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DiffLine {
     pub kind: String, // "ctx" | "add" | "del"
     pub old_line: Option<u32>,
@@ -256,6 +266,60 @@ pub fn list_branches(path: &Path) -> anyhow::Result<Vec<BranchInfo>> {
     }
     branches.sort_by(|a, b| a.name.cmp(&b.name));
     Ok(branches)
+}
+
+pub fn list_tree(repo_path: &Path) -> anyhow::Result<Vec<TreeEntry>> {
+    let repo = gix::open(repo_path)?;
+    let head_tree = repo.head_tree()?;
+    walk_tree(&repo, &head_tree, "")
+}
+
+fn walk_tree(
+    repo: &gix::Repository,
+    tree: &gix::Tree<'_>,
+    prefix: &str,
+) -> anyhow::Result<Vec<TreeEntry>> {
+    let mut entries: Vec<TreeEntry> = Vec::new();
+    for entry_res in tree.iter() {
+        let entry = entry_res?;
+        let name = entry.filename().to_str_lossy().into_owned();
+        let path = if prefix.is_empty() {
+            name.clone()
+        } else {
+            format!("{prefix}/{name}")
+        };
+        let mode = entry.mode();
+        let oid = entry.id().to_string();
+        let kind: &str = if mode.is_tree() {
+            "tree"
+        } else if mode.is_link() {
+            "symlink"
+        } else if mode.is_commit() {
+            "submodule"
+        } else {
+            "blob"
+        };
+        let children = if mode.is_tree() {
+            let subtree = repo.find_object(entry.id().detach())?.try_into_tree()?;
+            walk_tree(repo, &subtree, &path)?
+        } else {
+            Vec::new()
+        };
+        entries.push(TreeEntry {
+            name,
+            path,
+            kind: kind.into(),
+            oid,
+            children,
+        });
+    }
+    // Folders first, then files; alphabetical within each.
+    entries.sort_by(|a, b| {
+        let a_dir = a.kind == "tree";
+        let b_dir = b.kind == "tree";
+        b_dir.cmp(&a_dir).then_with(|| a.name.cmp(&b.name))
+    });
+    Ok(entries)
 }
 
 pub fn diff_commit(path: &Path, oid: &str) -> anyhow::Result<CommitDiff> {

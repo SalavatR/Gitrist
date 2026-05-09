@@ -44,7 +44,13 @@ within each section.
 - [x] Tags (`refs/tags/*`). Separate endpoint `/api/repo/tags`,
       sidebar block. Annotated vs lightweight detected via
       `peel_to_id` comparison.
-- [ ] File tree at a commit/HEAD: `/api/repo/tree?path=…&oid=…`.
+- [x] File tree at HEAD: `/api/repo/tree?path=…` returns nested
+      `TreeEntry` with kind/oid/children. UI sidebar shows a
+      browsable file-tree block; folders are `<details>` you can
+      open/close, files are leaves with kind-aware glyphs.
+- [ ] File viewer: clicking a file in the tree opens it in a new
+      main-panel section with syntax highlighting (reuses the
+      tree-sitter pipeline).
 - [ ] Commit-by-oid: `/api/repo/commit?path=…&oid=…` for permalinks.
 - [ ] Blame: `/api/repo/blame?path=…&file=…`.
 

@@ -52,6 +52,16 @@ struct RemoteBranchInfo {
 }
 
 #[derive(Deserialize, Clone, PartialEq, Debug)]
+struct TreeEntry {
+    name: String,
+    path: String,
+    kind: String,
+    oid: String,
+    #[serde(default)]
+    children: Vec<TreeEntry>,
+}
+
+#[derive(Deserialize, Clone, PartialEq, Debug)]
 struct DiffLine {
     kind: String,
     old_line: Option<u32>,
@@ -141,6 +151,10 @@ pub fn App() -> Element {
         let path = current_repo.read().clone();
         async move { fetch_tags(&path).await }
     });
+    let tree = use_resource(move || {
+        let path = current_repo.read().clone();
+        async move { fetch_tree(&path).await }
+    });
     let diff = use_resource(move || {
         let path = current_repo.read().clone();
         let oid = selected_oid.read().clone();
@@ -218,6 +232,13 @@ pub fn App() -> Element {
                             {render_status_count(&status.read_unchecked())}
                         }
                         {render_status(&status.read_unchecked(), selected_oid, selected_file)}
+                    }
+                    section { class: "side-block",
+                        div { class: "side-title",
+                            span { "Files at HEAD" }
+                            {render_tree_count(&tree.read_unchecked())}
+                        }
+                        {render_tree(&tree.read_unchecked())}
                     }
                 }
 
@@ -323,6 +344,88 @@ fn render_remote_count(state: &Option<Result<Vec<RemoteBranchInfo>, String>>) ->
         rsx! { span { class: "count", "{n}" } }
     } else {
         rsx! {}
+    }
+}
+
+fn render_tree_count(state: &Option<Result<Vec<TreeEntry>, String>>) -> Element {
+    if let Some(Ok(t)) = state {
+        let n = count_blobs(t);
+        rsx! { span { class: "count", "{n}" } }
+    } else {
+        rsx! {}
+    }
+}
+
+fn count_blobs(entries: &[TreeEntry]) -> usize {
+    entries
+        .iter()
+        .map(|e| {
+            if e.kind == "tree" {
+                count_blobs(&e.children)
+            } else {
+                1
+            }
+        })
+        .sum()
+}
+
+fn render_tree(state: &Option<Result<Vec<TreeEntry>, String>>) -> Element {
+    match state {
+        Some(Ok(entries)) if entries.is_empty() => {
+            rsx! { p { class: "muted small", "Empty tree." } }
+        }
+        Some(Ok(entries)) => {
+            let rows = entries.clone();
+            rsx! {
+                div { class: "file-tree",
+                    for e in rows {
+                        {render_tree_node(e)}
+                    }
+                }
+            }
+        }
+        Some(Err(e)) => {
+            let msg = e.clone();
+            rsx! { p { class: "err small", "Error: {msg}" } }
+        }
+        None => rsx! { p { class: "muted small", "Loading…" } },
+    }
+}
+
+fn render_tree_node(entry: TreeEntry) -> Element {
+    let name = entry.name.clone();
+    let kind = entry.kind.clone();
+    let path = entry.path.clone();
+    if entry.kind == "tree" {
+        let children = entry.children.clone();
+        rsx! {
+            details { class: "tree-folder",
+                summary { class: "tree-row tree-folder-row",
+                    span { class: "tree-glyph" }
+                    span { class: "tree-name", "{name}" }
+                }
+                div { class: "tree-children",
+                    for c in children {
+                        {render_tree_node(c)}
+                    }
+                }
+            }
+        }
+    } else {
+        let glyph = match kind.as_str() {
+            "symlink" => "↗",
+            "submodule" => "⊕",
+            _ => "·",
+        };
+        rsx! {
+            div {
+                key: "{path}",
+                class: "tree-row tree-blob-row tree-kind-{kind}",
+                title: "{path}",
+                span { class: "tree-glyph blob", "{glyph}" }
+                span { class: "tree-name", "{name}" }
+            }
+        }
     }
 }
 
@@ -1042,6 +1145,11 @@ async fn fetch_remotes(path: &str) -> Result<Vec<RemoteBranchInfo>, String> {
 }
 
 #[cfg(target_arch = "wasm32")]
+async fn fetch_tree(path: &str) -> Result<Vec<TreeEntry>, String> {
+    fetch_json(&format!("/api/repo/tree?path={path}")).await
+}
+
+#[cfg(target_arch = "wasm32")]
 async fn fetch_diff(path: &str, oid: &str) -> Result<CommitDiff, String> {
     fetch_json(&format!("/api/repo/diff?path={path}&oid={oid}")).await
 }
@@ -1090,6 +1198,11 @@ async fn fetch_tags(_path: &str) -> Result<Vec<TagInfo>, String> {
 
 #[cfg(not(target_arch = "wasm32"))]
 async fn fetch_remotes(_path: &str) -> Result<Vec<RemoteBranchInfo>, String> {
+    Err("native build: fetching not implemented".into())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+async fn fetch_tree(_path: &str) -> Result<Vec<TreeEntry>, String> {
     Err("native build: fetching not implemented".into())
 }
 

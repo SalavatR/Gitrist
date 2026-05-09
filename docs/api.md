@@ -174,6 +174,46 @@ curl 'http://127.0.0.1:3737/api/repo/remotes?path=/home/me/myrepo'
 `name` is the short form (no `refs/remotes/` prefix); `remote` is
 the leading segment so the UI can group entries by remote.
 
+## `GET /api/repo/tree?path=<path>`
+
+Returns the recursive file tree at HEAD as a nested list. Folders
+come first, then files, alphabetical within each level.
+
+```sh
+curl 'http://127.0.0.1:3737/api/repo/tree?path=/home/me/myrepo'
+```
+
+```json
+[
+  {
+    "name": "src",
+    "path": "src",
+    "kind": "tree",
+    "oid": "abc123…",
+    "children": [
+      {
+        "name": "main.rs",
+        "path": "src/main.rs",
+        "kind": "blob",
+        "oid": "def456…"
+      }
+    ]
+  },
+  {
+    "name": "Cargo.toml",
+    "path": "Cargo.toml",
+    "kind": "blob",
+    "oid": "789abc…"
+  }
+]
+```
+
+- `kind` — `tree` (folder), `blob` (file), `symlink`, or `submodule`.
+- `path` — full path from repository root.
+- `oid` — object id (the tree or blob's oid).
+- `children` — nested entries; only present (and only non-empty) on
+  trees. For blobs the field is omitted.
+
 ## `GET /api/repo/diff?path=<path>&oid=<commit-oid>`
 
 Diff of a commit against its first parent (against the empty tree for

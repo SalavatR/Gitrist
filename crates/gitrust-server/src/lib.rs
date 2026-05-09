@@ -14,8 +14,8 @@ use tower_http::trace::TraceLayer;
 
 use gitrust_core::{
     BranchInfo, CommitDiff, CommitInfo, FileDiff, RemoteBranchInfo, RepoSummary, StatusEntry,
-    TagInfo, diff_commit, diff_working, list_branches, list_remote_branches, list_status,
-    list_tags, log_commits, summarize_repo,
+    TagInfo, TreeEntry, diff_commit, diff_working, list_branches, list_remote_branches,
+    list_status, list_tags, list_tree, log_commits, summarize_repo,
 };
 
 #[derive(Serialize)]
@@ -85,6 +85,11 @@ async fn repo_remotes(
         .map_err(ApiError::from)
 }
 
+async fn repo_tree(Query(q): Query<PathQuery>) -> Result<Json<Vec<TreeEntry>>, ApiError> {
+    let path = PathBuf::from(q.path);
+    list_tree(&path).map(Json).map_err(ApiError::from)
+}
+
 #[derive(Deserialize)]
 struct DiffQuery {
     path: String,
@@ -135,6 +140,7 @@ pub fn router(web_dist: Option<PathBuf>) -> Router {
         .route("/repo/branches", get(repo_branches))
         .route("/repo/tags", get(repo_tags))
         .route("/repo/remotes", get(repo_remotes))
+        .route("/repo/tree", get(repo_tree))
         .route("/repo/diff", get(repo_diff))
         .route("/repo/diff/working", get(repo_diff_working));
 

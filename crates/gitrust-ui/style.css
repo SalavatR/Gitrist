@@ -236,6 +236,42 @@ a:hover { text-decoration: underline; }
 .branch-list li .marker.tag.annotated { color: var(--accent); }
 .branch-list li .marker.remote { color: var(--tok-namespace); font-size: 0.85rem; }
 
+/* File tree */
+.file-tree {
+  font-size: 0.85rem;
+  max-height: 24rem;
+  overflow-y: auto;
+}
+.tree-row {
+  display: grid;
+  grid-template-columns: 1.2em 1fr;
+  gap: 0.4rem;
+  align-items: center;
+  padding: 0.15rem 0.25rem;
+  border-radius: var(--radius);
+}
+.tree-row:hover { background: var(--surface-2); }
+.tree-name {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: var(--mono);
+  font-size: 0.78rem;
+}
+.tree-folder-row { cursor: pointer; user-select: none; }
+.tree-folder-row .tree-glyph::before { content: "▸"; color: var(--muted); font-size: 0.7rem; text-align: center; }
+details.tree-folder[open] > .tree-folder-row .tree-glyph::before { content: "▾"; }
+details.tree-folder summary.tree-folder-row { list-style: none; }
+details.tree-folder summary.tree-folder-row::-webkit-details-marker { display: none; }
+.tree-children { padding-left: 0.95rem; }
+.tree-blob-row .tree-glyph.blob {
+  color: var(--muted);
+  font-size: 0.72rem;
+  text-align: center;
+}
+.tree-kind-symlink .tree-name { color: var(--tok-namespace); }
+.tree-kind-submodule .tree-name { color: var(--tok-attribute); }
+
 /* Status list */
 .status-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
 .status-list li {
