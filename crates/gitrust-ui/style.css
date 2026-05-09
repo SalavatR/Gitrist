@@ -671,7 +671,19 @@ details.file-diff[open] .disclosure::before { content: "▾"; }
 .tok-operator,
 .tok-punctuation,
 .tok-punctuation-bracket,
-.tok-punctuation-delimiter  { color: var(--tok-punctuation); }
+.tok-punctuation-delimiter,
+.tok-punctuation-special    { color: var(--tok-punctuation); }
+.tok-text-title             { color: var(--tok-keyword); font-weight: 700; }
+.tok-text-strong            { font-weight: 700; }
+.tok-text-emphasis          { font-style: italic; }
+.tok-text-literal           {
+  color: var(--tok-string);
+  background: rgba(127, 127, 127, 0.10);
+  border-radius: 3px;
+  padding: 0 0.18em;
+}
+.tok-text-uri               { color: var(--tok-namespace); text-decoration: underline; }
+.tok-text-reference         { color: var(--tok-function); }
 
 /* Within add/del rows, slightly desaturate so the row tint still reads */
 .diff-line.line-add .tok-comment,

@@ -34,10 +34,17 @@ const HIGHLIGHT_NAMES: &[&str] = &[
     "punctuation",
     "punctuation.bracket",
     "punctuation.delimiter",
+    "punctuation.special",
     "string",
     "string.escape",
     "string.special",
     "tag",
+    "text.emphasis",
+    "text.literal",
+    "text.reference",
+    "text.strong",
+    "text.title",
+    "text.uri",
     "type",
     "type.builtin",
     "variable",
@@ -58,6 +65,7 @@ pub fn detect_language(path: &str) -> Option<&'static str> {
         "py" => "python",
         "toml" => "toml",
         "lua" => "lua",
+        "md" | "markdown" => "markdown",
         _ => return None,
     })
 }
@@ -162,6 +170,22 @@ fn config_for(lang: &str) -> Option<&'static HighlightConfiguration> {
             tree_sitter_lua::INJECTIONS_QUERY,
             tree_sitter_lua::LOCALS_QUERY
         ),
+        "markdown" => lang_cfg!(
+            MD_BLOCK,
+            "markdown",
+            tree_sitter_md::LANGUAGE,
+            tree_sitter_md::HIGHLIGHT_QUERY_BLOCK,
+            tree_sitter_md::INJECTION_QUERY_BLOCK,
+            ""
+        ),
+        "markdown_inline" => lang_cfg!(
+            MD_INLINE,
+            "markdown_inline",
+            tree_sitter_md::INLINE_LANGUAGE,
+            tree_sitter_md::HIGHLIGHT_QUERY_INLINE,
+            tree_sitter_md::INJECTION_QUERY_INLINE,
+            ""
+        ),
         _ => None,
     }
 }
@@ -171,7 +195,9 @@ fn config_for(lang: &str) -> Option<&'static HighlightConfiguration> {
 pub fn highlight_per_line(bytes: &[u8], lang: &str) -> Option<Vec<Vec<Token>>> {
     let cfg = config_for(lang)?;
     let mut highlighter = Highlighter::new();
-    let events = highlighter.highlight(cfg, bytes, None, |_| None).ok()?;
+    let events = highlighter
+        .highlight(cfg, bytes, None, |injected_name| config_for(injected_name))
+        .ok()?;
 
     let mut lines: Vec<Vec<Token>> = vec![Vec::new()];
     let mut stack: Vec<&'static str> = Vec::new();

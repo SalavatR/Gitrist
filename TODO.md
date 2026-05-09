@@ -30,8 +30,15 @@ within each section.
 - [x] Syntax highlighting via `tree-sitter` + `tree-sitter-highlight`,
       server-side. Tokens travel through the API as
       `DiffLine.tokens: Option<Vec<{text, class}>>`. Languages: rust,
-      json, html, css, typescript, tsx, javascript, python, toml, lua.
-      Markdown intentionally omitted (split block/inline grammars).
+      json, html, css, typescript, tsx, javascript, python, toml, lua,
+      markdown (block-only — inline emphasis/code/links not yet wired,
+      see below).
+- [ ] Markdown inline highlighting. Currently only the block grammar
+      runs; the block→inline injection chain via tree-sitter-highlight
+      doesn't surface inline events on this version, even though the
+      callback is invoked. Workaround: run inline grammar separately
+      and merge per-line tokens, preferring inline classes over
+      block's plain spans.
 - [x] Per-file collapse/expand for very large diffs (auto-collapse
       above 300 lines, manual via the file-header chevron).
 - [x] Side-by-side view as an alternative to the unified gutter.
