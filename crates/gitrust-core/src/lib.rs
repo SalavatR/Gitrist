@@ -1,7 +1,7 @@
-use std::convert::Infallible;
 use std::path::Path;
 
 use gix::bstr::ByteSlice;
+use gix::diff::blob::{Algorithm, InternedInput, Token};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -40,15 +40,27 @@ pub struct BranchInfo {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DiffLine {
-    pub added: bool,
+    pub kind: String, // "ctx" | "add" | "del"
+    pub old_line: Option<u32>,
+    pub new_line: Option<u32>,
     pub text: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DiffHunk {
+    pub old_start: u32,
+    pub old_count: u32,
+    pub new_start: u32,
+    pub new_count: u32,
+    pub lines: Vec<DiffLine>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FileDiff {
     pub path: String,
     pub kind: String, // "added" | "deleted" | "modified" | "renamed"
-    pub lines: Vec<DiffLine>,
+    pub is_binary: bool,
+    pub hunks: Vec<DiffHunk>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -169,7 +181,6 @@ pub fn list_branches(path: &Path) -> anyhow::Result<Vec<BranchInfo>> {
 }
 
 pub fn diff_commit(path: &Path, oid: &str) -> anyhow::Result<CommitDiff> {
-    use gix::object::blob::diff::lines::Change as LineChange;
     use gix::object::tree::diff::{Action, Change};
 
     let repo = gix::open(path)?;
@@ -185,7 +196,6 @@ pub fn diff_commit(path: &Path, oid: &str) -> anyhow::Result<CommitDiff> {
         None => repo.empty_tree(),
     };
 
-    let mut cache = repo.diff_resource_cache_for_tree_diff()?;
     let mut files: Vec<FileDiff> = Vec::new();
 
     old_tree
@@ -209,54 +219,37 @@ pub fn diff_commit(path: &Path, oid: &str) -> anyhow::Result<CommitDiff> {
                 Change::Rewrite { .. } => "renamed",
             };
 
-            let mut lines: Vec<DiffLine> = Vec::new();
-            if !matches!(change, Change::Rewrite { .. }) {
-                if let Ok(mut dp) = change.diff(&mut cache) {
-                    let _ = dp.lines(|lc| -> Result<(), Infallible> {
-                        match lc {
-                            LineChange::Addition { lines: ls } => {
-                                for l in ls {
-                                    lines.push(DiffLine {
-                                        added: true,
-                                        text: l.to_string(),
-                                    });
-                                }
-                            }
-                            LineChange::Deletion { lines: ls } => {
-                                for l in ls {
-                                    lines.push(DiffLine {
-                                        added: false,
-                                        text: l.to_string(),
-                                    });
-                                }
-                            }
-                            LineChange::Modification {
-                                lines_before,
-                                lines_after,
-                            } => {
-                                for l in lines_before {
-                                    lines.push(DiffLine {
-                                        added: false,
-                                        text: l.to_string(),
-                                    });
-                                }
-                                for l in lines_after {
-                                    lines.push(DiffLine {
-                                        added: true,
-                                        text: l.to_string(),
-                                    });
-                                }
-                            }
-                        }
-                        Ok(())
-                    });
+            let (old_bytes, new_bytes): (Vec<u8>, Vec<u8>) = match &change {
+                Change::Addition { id, .. } => {
+                    let obj = repo.find_object(id.detach())?;
+                    (Vec::new(), obj.data.clone())
                 }
-            }
+                Change::Deletion { id, .. } => {
+                    let obj = repo.find_object(id.detach())?;
+                    (obj.data.clone(), Vec::new())
+                }
+                Change::Modification {
+                    id, previous_id, ..
+                } => {
+                    let new_obj = repo.find_object(id.detach())?;
+                    let old_obj = repo.find_object(previous_id.detach())?;
+                    (old_obj.data.clone(), new_obj.data.clone())
+                }
+                Change::Rewrite { .. } => (Vec::new(), Vec::new()),
+            };
+
+            let is_binary = is_binary(&old_bytes) || is_binary(&new_bytes);
+            let hunks = if is_binary {
+                Vec::new()
+            } else {
+                compute_hunks(&old_bytes, &new_bytes)
+            };
 
             files.push(FileDiff {
                 path: location,
                 kind: kind.into(),
-                lines,
+                is_binary,
+                hunks,
             });
             Ok(Action::Continue(()))
         })?;
@@ -266,4 +259,91 @@ pub fn diff_commit(path: &Path, oid: &str) -> anyhow::Result<CommitDiff> {
         commit: commit_info,
         files,
     })
+}
+
+fn is_binary(bytes: &[u8]) -> bool {
+    bytes.iter().take(8192).any(|&b| b == 0)
+}
+
+fn compute_hunks(old: &[u8], new: &[u8]) -> Vec<DiffHunk> {
+    let input: InternedInput<&[u8]> = InternedInput::new(old, new);
+    let diff = gix::diff::blob::Diff::compute(Algorithm::Histogram, &input);
+    let context_len: u32 = 3;
+    let before_len = input.before.len() as u32;
+    let after_len = input.after.len() as u32;
+    let mut hunks: Vec<DiffHunk> = Vec::new();
+
+    for h in diff.hunks() {
+        let pre_old_start = h.before.start.saturating_sub(context_len);
+        let post_old_end = (h.before.end + context_len).min(before_len);
+        let pre_new_start = h.after.start.saturating_sub(context_len);
+        let post_new_end = (h.after.end + context_len).min(after_len);
+
+        let mut lines: Vec<DiffLine> = Vec::new();
+        let mut old_no = pre_old_start + 1;
+        let mut new_no = pre_new_start + 1;
+
+        for tok in &input.before[pre_old_start as usize..h.before.start as usize] {
+            lines.push(DiffLine {
+                kind: "ctx".into(),
+                old_line: Some(old_no),
+                new_line: Some(new_no),
+                text: token_text(&input, *tok),
+            });
+            old_no += 1;
+            new_no += 1;
+        }
+
+        for tok in &input.before[h.before.start as usize..h.before.end as usize] {
+            lines.push(DiffLine {
+                kind: "del".into(),
+                old_line: Some(old_no),
+                new_line: None,
+                text: token_text(&input, *tok),
+            });
+            old_no += 1;
+        }
+
+        for tok in &input.after[h.after.start as usize..h.after.end as usize] {
+            lines.push(DiffLine {
+                kind: "add".into(),
+                old_line: None,
+                new_line: Some(new_no),
+                text: token_text(&input, *tok),
+            });
+            new_no += 1;
+        }
+
+        for tok in &input.before[h.before.end as usize..post_old_end as usize] {
+            lines.push(DiffLine {
+                kind: "ctx".into(),
+                old_line: Some(old_no),
+                new_line: Some(new_no),
+                text: token_text(&input, *tok),
+            });
+            old_no += 1;
+            new_no += 1;
+        }
+
+        let len_before = post_old_end - pre_old_start;
+        let len_after = post_new_end - pre_new_start;
+
+        hunks.push(DiffHunk {
+            old_start: pre_old_start + 1,
+            old_count: len_before,
+            new_start: pre_new_start + 1,
+            new_count: len_after,
+            lines,
+        });
+    }
+
+    hunks
+}
+
+fn token_text(input: &InternedInput<&[u8]>, token: Token) -> String {
+    let bytes: &[u8] = input.interner[token];
+    let trimmed = bytes
+        .strip_suffix(b"\n")
+        .unwrap_or(bytes);
+    String::from_utf8_lossy(trimmed).into_owned()
 }

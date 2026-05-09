@@ -161,20 +161,34 @@ curl 'http://127.0.0.1:3737/api/repo/diff?path=/home/me/myrepo&oid=85ea44…'
     {
       "path": "src/main.rs",
       "kind": "added",
-      "lines": [
-        { "added": true,  "text": "use std::path::Path;" },
-        { "added": false, "text": "removed line" }
+      "is_binary": false,
+      "hunks": [
+        {
+          "old_start": 10, "old_count": 7,
+          "new_start": 10, "new_count": 8,
+          "lines": [
+            { "kind": "ctx", "old_line": 10, "new_line": 10, "text": "use std::path::Path;" },
+            { "kind": "del", "old_line": 11, "new_line": null, "text": "let x = 1;" },
+            { "kind": "add", "old_line": null, "new_line": 11, "text": "let x = 2;" }
+          ]
+        }
       ]
     }
   ]
 }
 ```
 
-- `files[].kind` — `added` | `deleted` | `modified` | `renamed`. (Renames
-  detected by gix's tree diff are reported but their `lines` array is
-  currently empty; full rename-aware blob diff is on the TODO.)
-- `files[].lines[].added` — true for additions, false for deletions.
-  No context lines yet — only changed lines are included.
+- `files[].kind` — `added` | `deleted` | `modified` | `renamed`. Renames
+  carry the `renamed` kind from gix's tree-diff but no `hunks` yet —
+  rename-aware blob diff is on the TODO.
+- `files[].is_binary` — true if either side has a NUL byte in the
+  first 8 KiB. Binary files come back with `hunks: []`.
+- `hunks[]` — unified-diff style hunks with three lines of context
+  before and after each change. Hunk headers in standard
+  `@@ -old_start,old_count +new_start,new_count @@` form.
+- `hunks[].lines[].kind` — `ctx` | `add` | `del`. Context lines have
+  both `old_line` and `new_line`; additions have only `new_line`;
+  deletions have only `old_line`. All line numbers are 1-indexed.
 
 Tree-level entries (directories) are filtered from the response;
 only file changes appear.

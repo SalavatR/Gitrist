@@ -39,15 +39,27 @@ struct BranchInfo {
 
 #[derive(Deserialize, Clone, PartialEq, Debug)]
 struct DiffLine {
-    added: bool,
+    kind: String,
+    old_line: Option<u32>,
+    new_line: Option<u32>,
     text: String,
+}
+
+#[derive(Deserialize, Clone, PartialEq, Debug)]
+struct DiffHunk {
+    old_start: u32,
+    old_count: u32,
+    new_start: u32,
+    new_count: u32,
+    lines: Vec<DiffLine>,
 }
 
 #[derive(Deserialize, Clone, PartialEq, Debug)]
 struct FileDiff {
     path: String,
     kind: String,
-    lines: Vec<DiffLine>,
+    is_binary: bool,
+    hunks: Vec<DiffHunk>,
 }
 
 #[derive(Deserialize, Clone, PartialEq, Debug)]
@@ -412,10 +424,20 @@ fn render_diff(
 fn render_file_diff(f: FileDiff) -> Element {
     let path = f.path.clone();
     let kind = f.kind.clone();
-    let lines = f.lines.clone();
-    let adds = lines.iter().filter(|l| l.added).count();
-    let dels = lines.iter().filter(|l| !l.added).count();
-    let no_lines = lines.is_empty();
+    let is_binary = f.is_binary;
+    let hunks = f.hunks.clone();
+    let mut adds = 0usize;
+    let mut dels = 0usize;
+    for h in &hunks {
+        for l in &h.lines {
+            match l.kind.as_str() {
+                "add" => adds += 1,
+                "del" => dels += 1,
+                _ => {}
+            }
+        }
+    }
+    let no_hunks = hunks.is_empty();
     rsx! {
         div { class: "file-diff",
             div { class: "file-header",
@@ -427,17 +449,59 @@ fn render_file_diff(f: FileDiff) -> Element {
                     span { class: "del-stat", "−{dels}" }
                 }
             }
-            if !no_lines {
-                pre { class: "lines",
-                    for l in lines {
-                        span { class: if l.added { "add" } else { "del" },
-                            {if l.added { "+ " } else { "- " }}
-                            "{l.text}"
-                            "\n"
-                        }
-                    }
+            if is_binary {
+                div { class: "binary-note", "Binary file, diff omitted." }
+            } else if no_hunks {
+                div { class: "binary-note", "No textual changes." }
+            } else {
+                for h in hunks {
+                    {render_hunk(h)}
                 }
             }
+        }
+    }
+}
+
+fn render_hunk(h: DiffHunk) -> Element {
+    let header = format!(
+        "@@ -{},{} +{},{} @@",
+        h.old_start, h.old_count, h.new_start, h.new_count
+    );
+    let lines = h.lines.clone();
+    rsx! {
+        div { class: "hunk",
+            div { class: "hunk-header", "{header}" }
+            div { class: "hunk-lines",
+                for l in lines {
+                    {render_diff_line(l)}
+                }
+            }
+        }
+    }
+}
+
+fn render_diff_line(l: DiffLine) -> Element {
+    let kind = l.kind.clone();
+    let old = l
+        .old_line
+        .map(|n| n.to_string())
+        .unwrap_or_default();
+    let new = l
+        .new_line
+        .map(|n| n.to_string())
+        .unwrap_or_default();
+    let marker = match kind.as_str() {
+        "add" => "+",
+        "del" => "-",
+        _ => " ",
+    };
+    let text = l.text.clone();
+    rsx! {
+        div { class: "diff-line line-{kind}",
+            span { class: "ln old", "{old}" }
+            span { class: "ln new", "{new}" }
+            span { class: "marker", "{marker}" }
+            span { class: "text", "{text}" }
         }
     }
 }

@@ -5,23 +5,26 @@ within each section.
 
 ## Diff viewer
 
-- [x] `GET /api/repo/diff?path=…&oid=…` — diff between a commit and
-      its first parent (empty tree for the root commit). Backed by
-      `gix-diff::tree` + `gix::object::blob::diff::Platform::lines`.
-- [x] UI: click a commit row → "Commit detail" section below the log
-      shows full body, parents, and per-file diff with green/red
-      colored add/delete lines.
-- [ ] Context lines around hunks (currently changes only — no
-      surrounding unchanged lines). Needs a different gix-diff entry
-      point or imara-diff's `UnifiedDiff` printer with a context
-      config.
+- [x] `GET /api/repo/diff?path=…&oid=…` — tree-diff via `gix-diff`,
+      blob-diff via `imara-diff` (re-exported through `gix::diff::blob`).
+- [x] UI: click commit → "Commit detail" section with per-file diff.
+- [x] Context lines around hunks (default 3 above / 3 below) plus
+      hunk headers in `@@ -a,b +c,d @@` form.
+- [x] Per-line numbers for both old and new files (gutter view).
+- [x] Binary file detection (NUL byte in first 8 KiB) → `is_binary:
+      true` and `hunks: []`.
+- [ ] Hunk merging when two adjacent hunks' context windows overlap
+      (today they're emitted independently and the redundant context
+      lines repeat).
 - [ ] `GET /api/repo/diff/working?path=…&file=…` — patch for a
       single working-tree file (modified or untracked); UI shows it
       inline with the status entry that's clicked.
-- [ ] Rename-aware blob diff for `Change::Rewrite` (currently the
-      file is reported as `renamed` but its `lines` array is empty).
+- [ ] Rename-aware blob diff for `Change::Rewrite` (currently
+      reported as `renamed` but `hunks: []`).
 - [ ] Syntax highlighting via `syntect` or `tree-sitter`.
-- [ ] Per-file collapse/expand for very large diffs.
+- [ ] Per-file collapse/expand for very large diffs; lazy load above
+      a threshold.
+- [ ] Side-by-side view as an alternative to the unified gutter.
 
 ## Reads (more history surface)
 
