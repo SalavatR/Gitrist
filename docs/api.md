@@ -196,7 +196,7 @@ curl 'http://127.0.0.1:3737/api/repo/diff?path=/home/me/myrepo&oid=85ea44…'
   Concatenating `text` over all tokens yields the same content as
   the line's `text` field. Field is omitted when the file extension
   doesn't map to a supported grammar (currently rust, json, html,
-  css, typescript, tsx, javascript, python, toml).
+  css, typescript, tsx, javascript, python, toml, lua).
 
 Tree-level entries (directories) are filtered from the response;
 only file changes appear.

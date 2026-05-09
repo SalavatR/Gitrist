@@ -57,6 +57,7 @@ pub fn detect_language(path: &str) -> Option<&'static str> {
         "js" | "jsx" | "mjs" | "cjs" => "javascript",
         "py" => "python",
         "toml" => "toml",
+        "lua" => "lua",
         _ => return None,
     })
 }
@@ -152,6 +153,14 @@ fn config_for(lang: &str) -> Option<&'static HighlightConfiguration> {
             tree_sitter_toml_ng::HIGHLIGHTS_QUERY,
             "",
             ""
+        ),
+        "lua" => lang_cfg!(
+            LUA,
+            "lua",
+            tree_sitter_lua::LANGUAGE,
+            tree_sitter_lua::HIGHLIGHTS_QUERY,
+            tree_sitter_lua::INJECTIONS_QUERY,
+            tree_sitter_lua::LOCALS_QUERY
         ),
         _ => None,
     }

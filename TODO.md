@@ -26,7 +26,7 @@ within each section.
 - [x] Syntax highlighting via `tree-sitter` + `tree-sitter-highlight`,
       server-side. Tokens travel through the API as
       `DiffLine.tokens: Option<Vec<{text, class}>>`. Languages: rust,
-      json, html, css, typescript, tsx, javascript, python, toml.
+      json, html, css, typescript, tsx, javascript, python, toml, lua.
       Markdown intentionally omitted (split block/inline grammars).
 - [ ] Per-file collapse/expand for very large diffs; lazy load above
       a threshold.
