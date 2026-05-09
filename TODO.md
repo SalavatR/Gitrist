@@ -48,9 +48,11 @@ within each section.
       `TreeEntry` with kind/oid/children. UI sidebar shows a
       browsable file-tree block; folders are `<details>` you can
       open/close, files are leaves with kind-aware glyphs.
-- [ ] File viewer: clicking a file in the tree opens it in a new
-      main-panel section with syntax highlighting (reuses the
-      tree-sitter pipeline).
+- [x] File viewer: clicking a file in the tree opens it in the
+      Detail panel with line-numbered, tree-sitter-highlighted
+      content. New `/api/repo/blob` endpoint serves blobs with
+      per-line tokens. Mutually exclusive with commit / working-tree
+      selections — clicking one always clears the others.
 - [ ] Commit-by-oid: `/api/repo/commit?path=…&oid=…` for permalinks.
 - [ ] Blame: `/api/repo/blame?path=…&file=…`.
 

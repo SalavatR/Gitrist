@@ -264,6 +264,9 @@ details.tree-folder[open] > .tree-folder-row .tree-glyph::before { content: "▾
 details.tree-folder summary.tree-folder-row { list-style: none; }
 details.tree-folder summary.tree-folder-row::-webkit-details-marker { display: none; }
 .tree-children { padding-left: 0.95rem; }
+.tree-blob-row { cursor: pointer; }
+.tree-blob-row.selected { background: var(--accent-bg); }
+.tree-blob-row.selected .tree-name { color: var(--accent); font-weight: 600; }
 .tree-blob-row .tree-glyph.blob {
   color: var(--muted);
   font-size: 0.72rem;
@@ -271,6 +274,36 @@ details.tree-folder summary.tree-folder-row::-webkit-details-marker { display: n
 }
 .tree-kind-symlink .tree-name { color: var(--tok-namespace); }
 .tree-kind-submodule .tree-name { color: var(--tok-attribute); }
+
+.blob-viewer {
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  line-height: 1.5;
+  background: var(--surface);
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  margin-top: 0.5rem;
+}
+.blob-line {
+  display: grid;
+  grid-template-columns: 4em minmax(0, 1fr);
+  align-items: baseline;
+  white-space: pre;
+}
+.blob-line .ln {
+  text-align: right;
+  padding: 0 0.6rem 0 0.6rem;
+  color: var(--muted);
+  font-size: 0.74rem;
+  user-select: none;
+  border-right: 1px solid var(--border-2);
+  font-variant-numeric: tabular-nums;
+}
+.blob-line .txt {
+  padding: 0 0.85rem;
+  overflow: visible;
+}
 
 /* Status list */
 .status-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }

@@ -214,6 +214,45 @@ curl 'http://127.0.0.1:3737/api/repo/tree?path=/home/me/myrepo'
 - `children` — nested entries; only present (and only non-empty) on
   trees. For blobs the field is omitted.
 
+## `GET /api/repo/blob?path=<path>&oid=<blob-oid>&file=<rel-path>`
+
+Returns the content of one blob with per-line tree-sitter
+highlighting (when the file extension maps to a supported language).
+The `file` parameter is what drives language detection — pass the
+relative path you'd see in the tree (e.g. `crates/gitrust-core/src/lib.rs`),
+not just the basename.
+
+```sh
+curl 'http://127.0.0.1:3737/api/repo/blob?path=/home/me/myrepo&oid=abc123…&file=src/main.rs'
+```
+
+```json
+{
+  "path": "src/main.rs",
+  "oid": "abc123…",
+  "size": 1234,
+  "is_binary": false,
+  "lines": [
+    {
+      "number": 1,
+      "text": "use std::path::Path;",
+      "tokens": [
+        { "text": "use", "class": "keyword" },
+        { "text": " std", "class": "" },
+        { "text": "::", "class": "punctuation.delimiter" }
+      ]
+    }
+  ]
+}
+```
+
+- `size` — blob size in bytes.
+- `is_binary` — set the same way as the diff endpoints (NUL byte in
+  first 8 KiB). Binary blobs come back with `lines: []`.
+- `lines[].number` — 1-indexed line number.
+- `lines[].tokens` — same shape as in the diff endpoint, optional
+  per the same language-detection rule.
+
 ## `GET /api/repo/diff?path=<path>&oid=<commit-oid>`
 
 Diff of a commit against its first parent (against the empty tree for

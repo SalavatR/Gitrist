@@ -67,6 +67,23 @@ pub struct TreeEntry {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BlobLine {
+    pub number: u32,
+    pub text: String,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub tokens: Option<Vec<HighlightToken>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BlobView {
+    pub path: String,
+    pub oid: String,
+    pub size: u64,
+    pub is_binary: bool,
+    pub lines: Vec<BlobLine>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DiffLine {
     pub kind: String, // "ctx" | "add" | "del"
     pub old_line: Option<u32>,
@@ -320,6 +337,53 @@ fn walk_tree(
         b_dir.cmp(&a_dir).then_with(|| a.name.cmp(&b.name))
     });
     Ok(entries)
+}
+
+pub fn show_blob(repo_path: &Path, oid: &str, file: &str) -> anyhow::Result<BlobView> {
+    let repo = gix::open(repo_path)?;
+    let blob_oid = gix::ObjectId::from_hex(oid.as_bytes())?;
+    let obj = repo.find_object(blob_oid)?;
+    let bytes = obj.data.clone();
+    let size = bytes.len() as u64;
+    let is_binary = is_binary(&bytes);
+
+    let lines = if is_binary {
+        Vec::new()
+    } else {
+        let lang = highlight::detect_language(file);
+        let token_lines: Vec<Vec<HighlightToken>> = lang
+            .and_then(|l| highlight::highlight_per_line(&bytes, l))
+            .unwrap_or_default();
+
+        let split: Vec<&[u8]> = bytes.split(|&b| b == b'\n').collect();
+        let drop_last = bytes.ends_with(b"\n")
+            && split.last().is_some_and(|l| l.is_empty());
+        let take = if drop_last {
+            split.len() - 1
+        } else {
+            split.len()
+        };
+
+        let mut out: Vec<BlobLine> = Vec::with_capacity(take);
+        for (idx, line_bytes) in split.iter().enumerate().take(take) {
+            let text = String::from_utf8_lossy(line_bytes).into_owned();
+            let tokens = token_lines.get(idx).cloned();
+            out.push(BlobLine {
+                number: idx as u32 + 1,
+                text,
+                tokens,
+            });
+        }
+        out
+    };
+
+    Ok(BlobView {
+        path: file.to_string(),
+        oid: blob_oid.to_string(),
+        size,
+        is_binary,
+        lines,
+    })
 }
 
 pub fn diff_commit(path: &Path, oid: &str) -> anyhow::Result<CommitDiff> {

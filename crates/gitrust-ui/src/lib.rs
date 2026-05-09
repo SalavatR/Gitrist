@@ -62,6 +62,29 @@ struct TreeEntry {
 }
 
 #[derive(Deserialize, Clone, PartialEq, Debug)]
+struct BlobLine {
+    number: u32,
+    text: String,
+    #[serde(default)]
+    tokens: Option<Vec<HToken>>,
+}
+
+#[derive(Deserialize, Clone, PartialEq, Debug)]
+struct BlobView {
+    path: String,
+    oid: String,
+    size: u64,
+    is_binary: bool,
+    lines: Vec<BlobLine>,
+}
+
+#[derive(Clone, PartialEq, Debug)]
+struct BlobSelection {
+    oid: String,
+    path: String,
+}
+
+#[derive(Deserialize, Clone, PartialEq, Debug)]
 struct DiffLine {
     kind: String,
     old_line: Option<u32>,
@@ -116,6 +139,7 @@ pub fn App() -> Element {
     let mut draft_repo = use_signal(|| initial.clone());
     let selected_oid = use_signal(|| None::<String>);
     let selected_file = use_signal(|| None::<String>);
+    let selected_blob = use_signal(|| None::<BlobSelection>);
     let mut side_by_side = use_signal(initial_side_by_side);
 
     use_effect(move || {
@@ -154,6 +178,16 @@ pub fn App() -> Element {
     let tree = use_resource(move || {
         let path = current_repo.read().clone();
         async move { fetch_tree(&path).await }
+    });
+    let blob_view = use_resource(move || {
+        let path = current_repo.read().clone();
+        let sel = selected_blob.read().clone();
+        async move {
+            match sel {
+                Some(b) => fetch_blob(&path, &b.oid, &b.path).await.map(Some),
+                None => Ok::<_, String>(None),
+            }
+        }
     });
     let diff = use_resource(move || {
         let path = current_repo.read().clone();
@@ -231,14 +265,19 @@ pub fn App() -> Element {
                             span { "Working tree" }
                             {render_status_count(&status.read_unchecked())}
                         }
-                        {render_status(&status.read_unchecked(), selected_oid, selected_file)}
+                        {render_status(&status.read_unchecked(), selected_oid, selected_file, selected_blob)}
                     }
                     section { class: "side-block",
                         div { class: "side-title",
                             span { "Files at HEAD" }
                             {render_tree_count(&tree.read_unchecked())}
                         }
-                        {render_tree(&tree.read_unchecked())}
+                        {render_tree(
+                            &tree.read_unchecked(),
+                            selected_oid,
+                            selected_file,
+                            selected_blob,
+                        )}
                     }
                 }
 
@@ -247,29 +286,34 @@ pub fn App() -> Element {
 
                     section { class: "main-block",
                         h2 { "History" }
-                        {render_log(&log.read_unchecked(), selected_oid, selected_file)}
+                        {render_log(&log.read_unchecked(), selected_oid, selected_file, selected_blob)}
                     }
 
                     section { class: "main-block",
                         div { class: "block-toolbar",
                             h2 { style: "margin: 0;",
-                                if selected_file.read().is_some() { "Working tree change" }
+                                if selected_blob.read().is_some() { "File viewer" }
+                                else if selected_file.read().is_some() { "Working tree change" }
                                 else { "Commit detail" }
                             }
-                            button {
-                                class: "view-toggle",
-                                onclick: move |_| {
-                                    let cur = *side_by_side.read();
-                                    side_by_side.set(!cur);
-                                },
-                                if *side_by_side.read() { "Unified" } else { "Side-by-side" }
+                            if selected_blob.read().is_none() {
+                                button {
+                                    class: "view-toggle",
+                                    onclick: move |_| {
+                                        let cur = *side_by_side.read();
+                                        side_by_side.set(!cur);
+                                    },
+                                    if *side_by_side.read() { "Unified" } else { "Side-by-side" }
+                                }
                             }
                         }
                         {render_detail(
                             &diff.read_unchecked(),
                             &working_diff.read_unchecked(),
+                            &blob_view.read_unchecked(),
                             selected_oid,
                             selected_file,
+                            selected_blob,
                             *side_by_side.read(),
                         )}
                     }
@@ -369,7 +413,12 @@ fn count_blobs(entries: &[TreeEntry]) -> usize {
         .sum()
 }
 
-fn render_tree(state: &Option<Result<Vec<TreeEntry>, String>>) -> Element {
+fn render_tree(
+    state: &Option<Result<Vec<TreeEntry>, String>>,
+    selected_oid: Signal<Option<String>>,
+    selected_file: Signal<Option<String>>,
+    selected_blob: Signal<Option<BlobSelection>>,
+) -> Element {
     match state {
         Some(Ok(entries)) if entries.is_empty() => {
             rsx! { p { class: "muted small", "Empty tree." } }
@@ -379,7 +428,7 @@ fn render_tree(state: &Option<Result<Vec<TreeEntry>, String>>) -> Element {
             rsx! {
                 div { class: "file-tree",
                     for e in rows {
-                        {render_tree_node(e)}
+                        {render_tree_node(e, selected_oid, selected_file, selected_blob)}
                     }
                 }
             }
@@ -392,7 +441,12 @@ fn render_tree(state: &Option<Result<Vec<TreeEntry>, String>>) -> Element {
     }
 }
 
-fn render_tree_node(entry: TreeEntry) -> Element {
+fn render_tree_node(
+    entry: TreeEntry,
+    mut selected_oid: Signal<Option<String>>,
+    mut selected_file: Signal<Option<String>>,
+    mut selected_blob: Signal<Option<BlobSelection>>,
+) -> Element {
     let name = entry.name.clone();
     let kind = entry.kind.clone();
     let path = entry.path.clone();
@@ -406,7 +460,7 @@ fn render_tree_node(entry: TreeEntry) -> Element {
                 }
                 div { class: "tree-children",
                     for c in children {
-                        {render_tree_node(c)}
+                        {render_tree_node(c, selected_oid, selected_file, selected_blob)}
                     }
                 }
             }
@@ -417,11 +471,33 @@ fn render_tree_node(entry: TreeEntry) -> Element {
             "submodule" => "⊕",
             _ => "·",
         };
+        let is_selected = selected_blob
+            .read()
+            .as_ref()
+            .is_some_and(|s| s.path == path);
+        let oid_for_click = entry.oid.clone();
+        let path_for_click = entry.path.clone();
         rsx! {
             div {
                 key: "{path}",
-                class: "tree-row tree-blob-row tree-kind-{kind}",
+                class: if is_selected { "tree-row tree-blob-row tree-kind-{kind} selected" } else { "tree-row tree-blob-row tree-kind-{kind}" },
                 title: "{path}",
+                onclick: move |_| {
+                    let same = selected_blob
+                        .read()
+                        .as_ref()
+                        .is_some_and(|s| s.path == path_for_click);
+                    if same {
+                        selected_blob.set(None);
+                    } else {
+                        selected_blob.set(Some(BlobSelection {
+                            oid: oid_for_click.clone(),
+                            path: path_for_click.clone(),
+                        }));
+                        selected_oid.set(None);
+                        selected_file.set(None);
+                    }
+                },
                 span { class: "tree-glyph blob", "{glyph}" }
                 span { class: "tree-name", "{name}" }
             }
@@ -551,6 +627,7 @@ fn render_status(
     state: &Option<Result<Vec<StatusEntry>, String>>,
     mut selected_oid: Signal<Option<String>>,
     mut selected_file: Signal<Option<String>>,
+    mut selected_blob: Signal<Option<BlobSelection>>,
 ) -> Element {
     match state {
         Some(Ok(entries)) if entries.is_empty() => {
@@ -577,6 +654,7 @@ fn render_status(
                                         } else {
                                             selected_file.set(Some(target));
                                             selected_oid.set(None);
+                                            selected_blob.set(None);
                                         }
                                     },
                                     span { class: "badge badge-{e.kind}", title: "{e.kind}",
@@ -613,6 +691,7 @@ fn render_log(
     state: &Option<Result<Vec<CommitInfo>, String>>,
     selected_oid: Signal<Option<String>>,
     selected_file: Signal<Option<String>>,
+    selected_blob: Signal<Option<BlobSelection>>,
 ) -> Element {
     match state {
         Some(Ok(commits)) if commits.is_empty() => {
@@ -632,7 +711,7 @@ fn render_log(
                     }
                     tbody {
                         for c in rows {
-                            {render_commit_row(c, selected_oid, selected_file)}
+                            {render_commit_row(c, selected_oid, selected_file, selected_blob)}
                         }
                     }
                 }
@@ -650,6 +729,7 @@ fn render_commit_row(
     c: CommitInfo,
     mut selected_oid: Signal<Option<String>>,
     mut selected_file: Signal<Option<String>>,
+    mut selected_blob: Signal<Option<BlobSelection>>,
 ) -> Element {
     let is_selected = selected_oid.read().as_deref() == Some(c.oid.as_str());
     let oid_for_click = c.oid.clone();
@@ -665,6 +745,7 @@ fn render_commit_row(
                 } else {
                     selected_oid.set(Some(target));
                     selected_file.set(None);
+                    selected_blob.set(None);
                 }
             },
             td { class: "td-oid", code { "{c.short_oid}" } }
@@ -678,17 +759,70 @@ fn render_commit_row(
 fn render_detail(
     commit_state: &Option<Result<Option<CommitDiff>, String>>,
     working_state: &Option<Result<Option<FileDiff>, String>>,
+    blob_state: &Option<Result<Option<BlobView>, String>>,
     selected_oid: Signal<Option<String>>,
     selected_file: Signal<Option<String>>,
+    selected_blob: Signal<Option<BlobSelection>>,
     side_by_side: bool,
 ) -> Element {
+    if selected_blob.read().is_some() {
+        return render_blob_viewer(blob_state);
+    }
     if let Some(file) = selected_file.read().clone() {
         return render_working_detail(working_state, &file, side_by_side);
     }
     if selected_oid.read().is_some() {
         return render_commit_detail(commit_state, side_by_side);
     }
-    rsx! { p { class: "muted", "Select a commit or status entry to inspect." } }
+    rsx! { p { class: "muted", "Select a commit, status entry, or file to inspect." } }
+}
+
+fn render_blob_viewer(state: &Option<Result<Option<BlobView>, String>>) -> Element {
+    match state {
+        Some(Ok(Some(b))) => {
+            let path = b.path.clone();
+            let oid = b.oid.clone();
+            let size = b.size;
+            let is_binary = b.is_binary;
+            let line_count = b.lines.len();
+            let lines = b.lines.clone();
+            rsx! {
+                div { class: "diff-header",
+                    div { class: "title", code { class: "full-oid", "{path}" } }
+                    div { class: "meta",
+                        "{line_count} lines · {size} bytes · "
+                        code { "{oid}" }
+                    }
+                }
+                if is_binary {
+                    p { class: "muted", "Binary file, content omitted." }
+                } else {
+                    div { class: "blob-viewer",
+                        for l in lines {
+                            {render_blob_line(l)}
+                        }
+                    }
+                }
+            }
+        }
+        Some(Ok(None)) | None => rsx! { p { class: "muted", "Loading…" } },
+        Some(Err(e)) => {
+            let msg = e.clone();
+            rsx! { p { class: "err", "Error: {msg}" } }
+        }
+    }
+}
+
+fn render_blob_line(l: BlobLine) -> Element {
+    let n = l.number;
+    let tokens = l.tokens.clone();
+    let plain = l.text.clone();
+    rsx! {
+        div { class: "blob-line",
+            span { class: "ln", "{n}" }
+            span { class: "txt", {render_line_content(&tokens, &plain)} }
+        }
+    }
 }
 
 fn render_working_detail(
@@ -1150,6 +1284,14 @@ async fn fetch_tree(path: &str) -> Result<Vec<TreeEntry>, String> {
 }
 
 #[cfg(target_arch = "wasm32")]
+async fn fetch_blob(path: &str, oid: &str, file: &str) -> Result<BlobView, String> {
+    fetch_json(&format!(
+        "/api/repo/blob?path={path}&oid={oid}&file={file}"
+    ))
+    .await
+}
+
+#[cfg(target_arch = "wasm32")]
 async fn fetch_diff(path: &str, oid: &str) -> Result<CommitDiff, String> {
     fetch_json(&format!("/api/repo/diff?path={path}&oid={oid}")).await
 }
@@ -1203,6 +1345,11 @@ async fn fetch_remotes(_path: &str) -> Result<Vec<RemoteBranchInfo>, String> {
 
 #[cfg(not(target_arch = "wasm32"))]
 async fn fetch_tree(_path: &str) -> Result<Vec<TreeEntry>, String> {
+    Err("native build: fetching not implemented".into())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+async fn fetch_blob(_path: &str, _oid: &str, _file: &str) -> Result<BlobView, String> {
     Err("native build: fetching not implemented".into())
 }
 

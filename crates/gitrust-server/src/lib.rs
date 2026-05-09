@@ -13,9 +13,10 @@ use tower_http::services::ServeDir;
 use tower_http::trace::TraceLayer;
 
 use gitrust_core::{
-    BranchInfo, CommitDiff, CommitInfo, FileDiff, RemoteBranchInfo, RepoSummary, StatusEntry,
-    TagInfo, TreeEntry, diff_commit, diff_working, list_branches, list_remote_branches,
-    list_status, list_tags, list_tree, log_commits, summarize_repo,
+    BlobView, BranchInfo, CommitDiff, CommitInfo, FileDiff, RemoteBranchInfo, RepoSummary,
+    StatusEntry, TagInfo, TreeEntry, diff_commit, diff_working, list_branches,
+    list_remote_branches, list_status, list_tags, list_tree, log_commits, show_blob,
+    summarize_repo,
 };
 
 #[derive(Serialize)]
@@ -91,6 +92,20 @@ async fn repo_tree(Query(q): Query<PathQuery>) -> Result<Json<Vec<TreeEntry>>, A
 }
 
 #[derive(Deserialize)]
+struct BlobQuery {
+    path: String,
+    oid: String,
+    file: String,
+}
+
+async fn repo_blob(Query(q): Query<BlobQuery>) -> Result<Json<BlobView>, ApiError> {
+    let path = PathBuf::from(q.path);
+    show_blob(&path, &q.oid, &q.file)
+        .map(Json)
+        .map_err(ApiError::from)
+}
+
+#[derive(Deserialize)]
 struct DiffQuery {
     path: String,
     oid: String,
@@ -141,6 +156,7 @@ pub fn router(web_dist: Option<PathBuf>) -> Router {
         .route("/repo/tags", get(repo_tags))
         .route("/repo/remotes", get(repo_remotes))
         .route("/repo/tree", get(repo_tree))
+        .route("/repo/blob", get(repo_blob))
         .route("/repo/diff", get(repo_diff))
         .route("/repo/diff/working", get(repo_diff_working));
 
