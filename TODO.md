@@ -89,12 +89,23 @@ within each section.
 - [ ] Error states with a retry button.
 - [ ] Manual light/dark toggle in addition to `color-scheme: light dark`.
 
-## Native shell (env-blocked here, OK on real desktop)
+## Native shell
 
-- [ ] `gitrust app` opens a desktop window via `wry+tao` pointing at
+- [x] `gitrust app` opens a desktop window via `wry+tao` pointing at
       the embedded server. Server runs in a tokio task; window owns
-      the event loop. Needs `webkit2gtk` + a display — not viable in
-      this PRoot Android dev chroot.
+      the event loop. Embedded WASM bundle via `include_dir!` so the
+      release binary is self-contained.
+- [x] Cross-platform fallback. When the `desktop` feature isn't
+      compiled in, or `DISPLAY`/`WAYLAND_DISPLAY` aren't set on
+      Linux, or wry init fails, prints the URL and serves
+      indefinitely so the user opens it in a browser.
+- [x] CI matrix building default + `desktop`-feature configurations
+      on ubuntu / macos / windows. Linux desktop job installs
+      webkit2gtk-4.1 + libsoup-3.0.
+- [ ] Native menu bar items (File → Open Repo, View → Reload, etc.).
+- [ ] System keyboard shortcuts (Cmd-W to close on macOS, etc.).
+- [ ] Pre-built release binaries via cargo-dist or GitHub Releases
+      automation, pinned to specific webkit2gtk-4.1 ABI on Linux.
 
 ## Infrastructure
 

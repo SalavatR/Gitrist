@@ -13,18 +13,25 @@ ADDR     ?= 127.0.0.1:3737
 WBG_VERSION ?= 0.2.121
 
 .DEFAULT_GOAL := help
-.PHONY: help setup web run serve check check-native check-wasm fmt lint clean
+.PHONY: help setup web run serve check check-native check-wasm fmt lint clean \
+        release release-desktop app
 
 help:
-	@echo "Targets:"
-	@echo "  make setup       — add $(TARGET) target + install wasm-bindgen-cli $(WBG_VERSION)"
-	@echo "  make web         — build WASM bundle into $(WEB_OUT)/"
-	@echo "  make run         — build bundle, then start server on $(ADDR)"
-	@echo "  make serve       — start server on $(ADDR) (skip bundle rebuild)"
-	@echo "  make check       — cargo check on native + wasm32 targets"
-	@echo "  make fmt         — cargo fmt --all"
-	@echo "  make lint        — cargo clippy --all-targets -- -D warnings"
-	@echo "  make clean       — cargo clean + remove $(WEB_OUT)"
+	@echo "Dev targets:"
+	@echo "  make setup            — add $(TARGET) target + install wasm-bindgen-cli $(WBG_VERSION)"
+	@echo "  make web              — build WASM bundle into $(WEB_OUT)/"
+	@echo "  make run              — build bundle, then start server on $(ADDR)"
+	@echo "  make serve            — start server on $(ADDR) (skip bundle rebuild)"
+	@echo "  make app              — build bundle, then run \`gitrust app\` (URL fallback if no display)"
+	@echo "  make check            — cargo check on native + wasm32 targets"
+	@echo "  make fmt              — cargo fmt --all"
+	@echo "  make lint              — cargo clippy --all-targets -- -D warnings"
+	@echo "  make clean            — cargo clean + remove $(WEB_OUT)"
+	@echo
+	@echo "Release builds (single binary with embedded WASM bundle):"
+	@echo "  make release          — server-only release (no native window)"
+	@echo "  make release-desktop  — server + native window via wry. Linux needs"
+	@echo "                          libwebkit2gtk-4.1-dev libsoup-3.0-dev pkg-config"
 	@echo
 	@echo "Override ADDR (e.g. ADDR=0.0.0.0:8080 make run) to bind elsewhere."
 
@@ -58,6 +65,23 @@ fmt:
 
 lint:
 	$(CARGO) clippy --all-targets -- -D warnings
+
+app: web
+	$(CARGO) run -p gitrust -- app --addr $(ADDR)
+
+release: web
+	$(CARGO) build -p gitrust --release
+	@echo
+	@echo "Built: target/release/gitrust"
+	@echo "Run with: ./target/release/gitrust app          # URL-mode (no window)"
+	@echo "          ./target/release/gitrust serve        # server-only"
+
+release-desktop: web
+	$(CARGO) build -p gitrust --release --features desktop
+	@echo
+	@echo "Built: target/release/gitrust  (with native-window support)"
+	@echo "Run with: ./target/release/gitrust app          # opens a native window"
+	@echo "          ./target/release/gitrust app --no-window  # URL mode"
 
 clean:
 	$(CARGO) clean
