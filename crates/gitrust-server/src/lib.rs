@@ -1,13 +1,7 @@
 use std::net::SocketAddr;
 use std::path::PathBuf;
 
-use axum::{
-    Json, Router,
-    extract::Query,
-    http::StatusCode,
-    response::IntoResponse,
-    routing::get,
-};
+use axum::{Json, Router, extract::Query, http::StatusCode, response::IntoResponse, routing::get};
 use serde::{Deserialize, Serialize};
 use tower_http::services::ServeDir;
 use tower_http::trace::TraceLayer;
@@ -65,9 +59,7 @@ async fn repo_status(Query(q): Query<PathQuery>) -> Result<Json<Vec<StatusEntry>
     list_status(&path).map(Json).map_err(ApiError::from)
 }
 
-async fn repo_branches(
-    Query(q): Query<PathQuery>,
-) -> Result<Json<Vec<BranchInfo>>, ApiError> {
+async fn repo_branches(Query(q): Query<PathQuery>) -> Result<Json<Vec<BranchInfo>>, ApiError> {
     let path = PathBuf::from(q.path);
     list_branches(&path).map(Json).map_err(ApiError::from)
 }
@@ -77,9 +69,7 @@ async fn repo_tags(Query(q): Query<PathQuery>) -> Result<Json<Vec<TagInfo>>, Api
     list_tags(&path).map(Json).map_err(ApiError::from)
 }
 
-async fn repo_remotes(
-    Query(q): Query<PathQuery>,
-) -> Result<Json<Vec<RemoteBranchInfo>>, ApiError> {
+async fn repo_remotes(Query(q): Query<PathQuery>) -> Result<Json<Vec<RemoteBranchInfo>>, ApiError> {
     let path = PathBuf::from(q.path);
     list_remote_branches(&path)
         .map(Json)
@@ -122,9 +112,7 @@ struct DiffWorkingQuery {
     file: String,
 }
 
-async fn repo_diff_working(
-    Query(q): Query<DiffWorkingQuery>,
-) -> Result<Json<FileDiff>, ApiError> {
+async fn repo_diff_working(Query(q): Query<DiffWorkingQuery>) -> Result<Json<FileDiff>, ApiError> {
     let path = PathBuf::from(q.path);
     diff_working(&path, &q.file)
         .map(Json)

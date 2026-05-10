@@ -1037,14 +1037,8 @@ fn render_line_content(tokens: &Option<Vec<Token>>, plain: &str) -> Element {
 
 fn render_diff_line(l: DiffLine) -> Element {
     let kind = l.kind.clone();
-    let old = l
-        .old_line
-        .map(|n| n.to_string())
-        .unwrap_or_default();
-    let new = l
-        .new_line
-        .map(|n| n.to_string())
-        .unwrap_or_default();
+    let old = l.old_line.map(|n| n.to_string()).unwrap_or_default();
+    let new = l.new_line.map(|n| n.to_string()).unwrap_or_default();
     let marker = match kind.as_str() {
         "add" => "+",
         "del" => "-",
@@ -1086,20 +1080,19 @@ fn token_class_to_css(class: &str) -> String {
 fn initial_repo() -> String {
     use gloo_storage::Storage;
     let window = gloo_utils::window();
-    if let Ok(hash) = window.location().hash() {
-        if hash.len() > 1 {
-            if let Ok(decoded) = urlencoding::decode(&hash[1..]) {
-                let s = decoded.into_owned();
-                if !s.is_empty() {
-                    return s;
-                }
-            }
+    if let Ok(hash) = window.location().hash()
+        && hash.len() > 1
+        && let Ok(decoded) = urlencoding::decode(&hash[1..])
+    {
+        let s = decoded.into_owned();
+        if !s.is_empty() {
+            return s;
         }
     }
-    if let Ok(stored) = gloo_storage::LocalStorage::get::<String>(REPO_STORAGE_KEY) {
-        if !stored.is_empty() {
-            return stored;
-        }
+    if let Ok(stored) = gloo_storage::LocalStorage::get::<String>(REPO_STORAGE_KEY)
+        && !stored.is_empty()
+    {
+        return stored;
     }
     DEFAULT_REPO.to_string()
 }
@@ -1233,10 +1226,7 @@ async fn fetch_tree(path: &str) -> Result<Vec<TreeEntry>, String> {
 
 #[cfg(target_arch = "wasm32")]
 async fn fetch_blob(path: &str, oid: &str, file: &str) -> Result<BlobView, String> {
-    fetch_json(&format!(
-        "/api/repo/blob?path={path}&oid={oid}&file={file}"
-    ))
-    .await
+    fetch_json(&format!("/api/repo/blob?path={path}&oid={oid}&file={file}")).await
 }
 
 #[cfg(target_arch = "wasm32")]

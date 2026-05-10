@@ -191,7 +191,10 @@ pub fn highlight_per_line(bytes: &[u8], lang: &str) -> Option<Vec<Vec<Token>>> {
     let cfg = config_for(lang)?;
     let mut highlighter = Highlighter::new();
     let events = highlighter
-        .highlight(cfg, bytes, None, |injected_name| config_for(injected_name))
+        .highlight(cfg, bytes, None, {
+            #[allow(clippy::redundant_closure)]
+            |name| config_for(name)
+        })
         .ok()?;
 
     let mut lines: Vec<Vec<Token>> = vec![Vec::new()];

@@ -244,8 +244,7 @@ pub fn show_blob(repo_path: &Path, oid: &str, file: &str) -> anyhow::Result<Blob
             .unwrap_or_default();
 
         let split: Vec<&[u8]> = bytes.split(|&b| b == b'\n').collect();
-        let drop_last = bytes.ends_with(b"\n")
-            && split.last().is_some_and(|l| l.is_empty());
+        let drop_last = bytes.ends_with(b"\n") && split.last().is_some_and(|l| l.is_empty());
         let take = if drop_last {
             split.len() - 1
         } else {
@@ -283,10 +282,7 @@ pub fn diff_commit(path: &Path, oid: &str) -> anyhow::Result<CommitDiff> {
     let commit = repo.find_object(target_oid)?.try_into_commit()?;
     let new_tree = commit.tree()?;
     let old_tree = match commit.parent_ids().next() {
-        Some(parent_id) => repo
-            .find_object(parent_id)?
-            .try_into_commit()?
-            .tree()?,
+        Some(parent_id) => repo.find_object(parent_id)?.try_into_commit()?.tree()?,
         None => repo.empty_tree(),
     };
 
@@ -296,73 +292,72 @@ pub fn diff_commit(path: &Path, oid: &str) -> anyhow::Result<CommitDiff> {
     platform.options(|opts| {
         opts.track_rewrites(Some(gix::diff::Rewrites::default()));
     });
-    platform
-        .for_each_to_obtain_tree(&new_tree, |change| -> Result<Action, anyhow::Error> {
-            let file = match &change {
-                Change::Addition { id, entry_mode, .. } if !entry_mode.is_tree() => {
-                    let obj = repo.find_object(id.detach())?;
-                    Some(make_file_diff(
-                        change.location().to_str_lossy().into_owned(),
-                        None,
-                        "added",
-                        &[],
-                        &obj.data,
-                    ))
-                }
-                Change::Deletion { id, entry_mode, .. } if !entry_mode.is_tree() => {
-                    let obj = repo.find_object(id.detach())?;
-                    Some(make_file_diff(
-                        change.location().to_str_lossy().into_owned(),
-                        None,
-                        "deleted",
-                        &obj.data,
-                        &[],
-                    ))
-                }
-                Change::Modification {
-                    id,
-                    previous_id,
-                    entry_mode,
-                    ..
-                } if !entry_mode.is_tree() => {
-                    let new_obj = repo.find_object(id.detach())?;
-                    let old_obj = repo.find_object(previous_id.detach())?;
-                    Some(make_file_diff(
-                        change.location().to_str_lossy().into_owned(),
-                        None,
-                        "modified",
-                        &old_obj.data,
-                        &new_obj.data,
-                    ))
-                }
-                Change::Rewrite {
-                    source_id,
-                    source_location,
-                    id,
-                    location,
-                    entry_mode,
-                    copy,
-                    ..
-                } if !entry_mode.is_tree() => {
-                    let new_obj = repo.find_object(id.detach())?;
-                    let old_obj = repo.find_object(source_id.detach())?;
-                    let kind = if *copy { "copied" } else { "renamed" };
-                    Some(make_file_diff(
-                        location.to_str_lossy().into_owned(),
-                        Some(source_location.to_str_lossy().into_owned()),
-                        kind,
-                        &old_obj.data,
-                        &new_obj.data,
-                    ))
-                }
-                _ => None,
-            };
-
-            if let Some(fd) = file {
-                files.push(fd);
+    platform.for_each_to_obtain_tree(&new_tree, |change| -> Result<Action, anyhow::Error> {
+        let file = match &change {
+            Change::Addition { id, entry_mode, .. } if !entry_mode.is_tree() => {
+                let obj = repo.find_object(id.detach())?;
+                Some(make_file_diff(
+                    change.location().to_str_lossy().into_owned(),
+                    None,
+                    "added",
+                    &[],
+                    &obj.data,
+                ))
             }
-            Ok(Action::Continue(()))
-        })?;
+            Change::Deletion { id, entry_mode, .. } if !entry_mode.is_tree() => {
+                let obj = repo.find_object(id.detach())?;
+                Some(make_file_diff(
+                    change.location().to_str_lossy().into_owned(),
+                    None,
+                    "deleted",
+                    &obj.data,
+                    &[],
+                ))
+            }
+            Change::Modification {
+                id,
+                previous_id,
+                entry_mode,
+                ..
+            } if !entry_mode.is_tree() => {
+                let new_obj = repo.find_object(id.detach())?;
+                let old_obj = repo.find_object(previous_id.detach())?;
+                Some(make_file_diff(
+                    change.location().to_str_lossy().into_owned(),
+                    None,
+                    "modified",
+                    &old_obj.data,
+                    &new_obj.data,
+                ))
+            }
+            Change::Rewrite {
+                source_id,
+                source_location,
+                id,
+                location,
+                entry_mode,
+                copy,
+                ..
+            } if !entry_mode.is_tree() => {
+                let new_obj = repo.find_object(id.detach())?;
+                let old_obj = repo.find_object(source_id.detach())?;
+                let kind = if *copy { "copied" } else { "renamed" };
+                Some(make_file_diff(
+                    location.to_str_lossy().into_owned(),
+                    Some(source_location.to_str_lossy().into_owned()),
+                    kind,
+                    &old_obj.data,
+                    &new_obj.data,
+                ))
+            }
+            _ => None,
+        };
+
+        if let Some(fd) = file {
+            files.push(fd);
+        }
+        Ok(Action::Continue(()))
+    })?;
 
     files.sort_by(|a, b| a.path.cmp(&b.path));
     Ok(CommitDiff {
@@ -476,13 +471,13 @@ fn compute_hunks(
         let new_start = h.after.start.saturating_sub(context_len);
         let new_end = (h.after.end + context_len).min(after_len);
 
-        if let Some(last) = groups.last_mut() {
-            if old_start <= last.old_end {
-                last.old_end = last.old_end.max(old_end);
-                last.new_end = last.new_end.max(new_end);
-                last.changes.push(h);
-                continue;
-            }
+        if let Some(last) = groups.last_mut()
+            && old_start <= last.old_end
+        {
+            last.old_end = last.old_end.max(old_end);
+            last.new_end = last.new_end.max(new_end);
+            last.changes.push(h);
+            continue;
         }
         groups.push(Group {
             old_start,
@@ -569,8 +564,6 @@ fn compute_hunks(
 
 fn token_text(input: &InternedInput<&[u8]>, token: IDToken) -> String {
     let bytes: &[u8] = input.interner[token];
-    let trimmed = bytes
-        .strip_suffix(b"\n")
-        .unwrap_or(bytes);
+    let trimmed = bytes.strip_suffix(b"\n").unwrap_or(bytes);
     String::from_utf8_lossy(trimmed).into_owned()
 }
