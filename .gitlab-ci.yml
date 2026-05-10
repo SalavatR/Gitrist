@@ -1,0 +1,61 @@
+# Mirrors .github/workflows/ci.yml. Whichever forge gets pushed to runs
+# the same set of checks. GitLab CI doesn't do an OS matrix as cleanly as
+# Actions, so the host-OS-sensitive part (desktop feature on macOS /
+# Windows) is the GitHub-only side; here we only verify Linux.
+
+stages:
+  - test
+
+variables:
+  CARGO_TERM_COLOR: always
+  # Keep cargo's caches inside the project root so GitLab's cache: paths
+  # picks them up between runs.
+  CARGO_HOME: $CI_PROJECT_DIR/.cargo
+
+default:
+  image: rust:latest
+  cache:
+    key:
+      files:
+        - Cargo.lock
+    paths:
+      - .cargo/registry/cache
+      - .cargo/registry/index
+      - target/
+
+check:
+  stage: test
+  script:
+    - cargo check --workspace --exclude gitrust-web
+
+check-desktop:
+  stage: test
+  before_script:
+    - apt-get update -qq
+    - apt-get install -y --no-install-recommends libwebkit2gtk-4.1-dev libsoup-3.0-dev pkg-config
+  script:
+    - cargo check -p gitrust --features desktop
+
+check-wasm:
+  stage: test
+  before_script:
+    - rustup target add wasm32-unknown-unknown
+  script:
+    - cargo check -p gitrust-web --target wasm32-unknown-unknown
+
+fmt:
+  stage: test
+  cache: []
+  before_script:
+    - rustup component add rustfmt
+  script:
+    - cargo fmt --all --check
+
+clippy:
+  stage: test
+  before_script:
+    - rustup component add clippy
+    - rustup target add wasm32-unknown-unknown
+  script:
+    - cargo clippy --workspace --exclude gitrust-web --all-targets -- -D warnings
+    - cargo clippy -p gitrust-web --target wasm32-unknown-unknown -- -D warnings
