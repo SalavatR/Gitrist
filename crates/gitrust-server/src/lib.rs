@@ -134,7 +134,19 @@ impl IntoResponse for ApiError {
     }
 }
 
-pub fn router(web_dist: Option<PathBuf>) -> Router {
+/// Where to source the WASM bundle from when serving the web UI.
+pub enum WebSource {
+    /// Serve files from a directory on disk (e.g. `crates/gitrust-web/dist`).
+    /// Useful for `make run` dev workflow with live-rebuild.
+    Disk(PathBuf),
+    /// Serve files from a `Dir` baked into the binary at compile time via
+    /// `include_dir!`. The chosen mode for release / `gitrust app` builds.
+    Embedded(&'static include_dir::Dir<'static>),
+    /// API only — every non-`/api` path 404s.
+    None,
+}
+
+pub fn router(source: WebSource) -> Router {
     let api = Router::new()
         .route("/health", get(health))
         .route("/repo/summary", get(repo_summary))
@@ -149,18 +161,67 @@ pub fn router(web_dist: Option<PathBuf>) -> Router {
         .route("/repo/diff/working", get(repo_diff_working));
 
     let mut app = Router::new().nest("/api", api);
-    if let Some(dist) = web_dist {
-        app = app.fallback_service(ServeDir::new(dist));
+    match source {
+        WebSource::Disk(dist) => {
+            app = app.fallback_service(ServeDir::new(dist));
+        }
+        WebSource::Embedded(bundle) => {
+            app = app.fallback(move |uri: axum::http::Uri| async move {
+                serve_embedded(uri, bundle)
+            });
+        }
+        WebSource::None => {}
     }
     app.layer(TraceLayer::new_for_http())
 }
 
-pub async fn serve(addr: SocketAddr, web_dist: Option<PathBuf>) -> anyhow::Result<()> {
+fn serve_embedded(
+    uri: axum::http::Uri,
+    bundle: &'static include_dir::Dir<'static>,
+) -> axum::response::Response {
+    let path_str = uri.path().trim_start_matches('/');
+    let lookup = if path_str.is_empty() {
+        "index.html"
+    } else {
+        path_str
+    };
+    let Some(file) = bundle.get_file(lookup) else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    let content_type = guess_content_type(lookup);
+    let body = axum::body::Body::from(file.contents());
+    let mut res = axum::response::Response::new(body);
+    res.headers_mut().insert(
+        axum::http::header::CONTENT_TYPE,
+        axum::http::HeaderValue::from_static(content_type),
+    );
+    res
+}
+
+fn guess_content_type(path: &str) -> &'static str {
+    let ext = path.rsplit('.').next().unwrap_or("");
+    match ext {
+        "html" | "htm" => "text/html; charset=utf-8",
+        "js" | "mjs" => "text/javascript",
+        "wasm" => "application/wasm",
+        "css" => "text/css; charset=utf-8",
+        "json" => "application/json",
+        "svg" => "image/svg+xml",
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "ico" => "image/x-icon",
+        "txt" | "md" => "text/plain; charset=utf-8",
+        _ => "application/octet-stream",
+    }
+}
+
+pub async fn serve(addr: SocketAddr, source: WebSource) -> anyhow::Result<()> {
     let listener = tokio::net::TcpListener::bind(addr).await?;
     tracing::info!(
         "gitrust-server listening on http://{}",
         listener.local_addr()?
     );
-    axum::serve(listener, router(web_dist)).await?;
+    axum::serve(listener, router(source)).await?;
     Ok(())
 }

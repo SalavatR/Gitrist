@@ -60,6 +60,7 @@ dioxus-web = "0.7"
 dioxus-desktop = "0.7"
 
 clap = { version = "4", features = ["derive"] }
+include_dir = "0.7"
 
 [profile.release]
 lto = "thin"

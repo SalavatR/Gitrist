@@ -15,6 +15,8 @@ struct BlobSelection {
 
 const DEFAULT_REPO: &str = "/home/salavat/gitrust";
 const LOG_LIMIT: usize = 50;
+const STATUS_POLL_INTERVAL_MS: u32 = 2_000;
+const REFS_POLL_INTERVAL_MS: u32 = 10_000;
 #[cfg(target_arch = "wasm32")]
 const REPO_STORAGE_KEY: &str = "gitrust.repo";
 #[cfg(target_arch = "wasm32")]
@@ -47,9 +49,24 @@ pub fn App() -> Element {
         let path = current_repo.read().clone();
         async move { fetch_log(&path, LOG_LIMIT).await }
     });
-    let status = use_resource(move || {
+    let mut status = use_resource(move || {
         let path = current_repo.read().clone();
         async move { fetch_status(&path).await }
+    });
+    let mut summary_for_poll = summary;
+    let mut log_for_poll = log;
+    use_future(move || async move {
+        loop {
+            sleep_ms(STATUS_POLL_INTERVAL_MS).await;
+            status.restart();
+        }
+    });
+    use_future(move || async move {
+        loop {
+            sleep_ms(REFS_POLL_INTERVAL_MS).await;
+            summary_for_poll.restart();
+            log_for_poll.restart();
+        }
     });
     let branches = use_resource(move || {
         let path = current_repo.read().clone();
@@ -1187,6 +1204,17 @@ fn now_unix() -> i64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs() as i64)
         .unwrap_or(0)
+}
+
+#[cfg(target_arch = "wasm32")]
+async fn sleep_ms(ms: u32) {
+    gloo_timers::future::TimeoutFuture::new(ms).await
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+async fn sleep_ms(_ms: u32) {
+    // No-op on native — auto-refresh only matters in the browser.
+    std::future::pending::<()>().await
 }
 
 #[cfg(target_arch = "wasm32")]
