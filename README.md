@@ -36,6 +36,19 @@ make run       # build WASM bundle and start the server on 127.0.0.1:3737
 Open <http://127.0.0.1:3737>, then type any local git repository's
 absolute path into the input at the top of the page and press **Load**.
 
+For a self-contained release binary that bakes the WASM bundle in:
+
+```sh
+make web                                    # build the bundle once
+cargo build --release                       # server-only, opens in a browser
+cargo build --release --features desktop    # server + native window via wry
+```
+
+The desktop feature pulls in wry/tao and on Linux requires
+`webkit2gtk-4.1` + `libsoup-3.0`. macOS uses WKWebView (built-in),
+Windows uses WebView2 (auto-bootstrap). Per-platform install
+instructions are in [docs/build.md](docs/build.md).
+
 `make help` lists all targets. Override the bind address with
 `ADDR=0.0.0.0:8080 make run`.
 

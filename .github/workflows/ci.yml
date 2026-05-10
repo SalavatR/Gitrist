@@ -9,14 +9,41 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  check-native:
-    name: cargo check (native)
-    runs-on: ubuntu-latest
+  # Default-features check across our three desktop OSes. No system deps —
+  # `desktop` feature is off so wry/tao aren't pulled in.
+  check:
+    name: cargo check (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: cargo check --workspace --exclude gitrust-web
+
+  # Desktop-feature build, including the wry/tao toolchain. Linux needs the
+  # webkit2gtk + libsoup dev packages; macOS uses WKWebView built-in;
+  # Windows uses WebView2 (auto-bootstrap by wry at runtime).
+  check-desktop:
+    name: cargo check --features desktop (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install Linux desktop deps
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libsoup-3.0-dev libssl-dev
+      - run: cargo check -p gitrust --features desktop
 
   check-wasm:
     name: cargo check (wasm32)

@@ -1,5 +1,49 @@
 # Build and dev
 
+## Per-platform setup
+
+### macOS
+
+No system deps. `cargo install --features desktop` (or `cargo build
+--release --features desktop` for a local build) just works — wry uses
+WKWebView, which ships with the OS.
+
+### Linux (Arch / Ubuntu / Fedora / etc.)
+
+The `desktop` feature pulls in `wry` and `tao`, which on Linux link
+against `webkit2gtk-4.1` + `libsoup-3.0`. Install them via your
+package manager, then build with `--features desktop`:
+
+```sh
+# Arch
+sudo pacman -S webkit2gtk-4.1 libsoup3 pkgconf
+
+# Debian / Ubuntu
+sudo apt-get install -y libwebkit2gtk-4.1-dev libsoup-3.0-dev pkg-config
+
+# Fedora
+sudo dnf install -y webkit2gtk4.1-devel libsoup3-devel pkgconf
+
+cargo build --release --features desktop
+```
+
+If you don't want a desktop window, build without the feature:
+`cargo build --release`. `gitrust app` then falls back to printing the
+URL for you to open in a browser. `gitrust serve` doesn't change
+behavior.
+
+### Windows
+
+`gitrust app --features desktop` uses WebView2. Most Windows 11 boxes
+ship with it; older ones get auto-bootstrapped by wry on first run.
+No additional dev-time install required.
+
+### Termux PRoot Ubuntu (this project's dev env)
+
+No webkit, no display server. Don't enable `desktop`. Use
+`gitrust serve` and open the URL in any browser (Termux's, the host
+Android browser, or any device on the LAN if you bind to `0.0.0.0`).
+
 ## make targets
 
 | Target       | Effect                                                                                                    |
