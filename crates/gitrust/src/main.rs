@@ -161,7 +161,7 @@ fn open_window(url: &str) -> Result<()> {
         .with_title("gitrust")
         .with_inner_size(tao::dpi::LogicalSize::new(1280.0, 800.0))
         .build(&event_loop)?;
-    let _webview = WebViewBuilder::new(&window).with_url(url).build()?;
+    let _webview = WebViewBuilder::new().with_url(url).build(&window)?;
     event_loop.run(move |event, _, control_flow| {
         *control_flow = ControlFlow::Wait;
         if let Event::WindowEvent {
