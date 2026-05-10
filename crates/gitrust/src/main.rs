@@ -1,5 +1,6 @@
 use std::net::SocketAddr;
 use std::path::PathBuf;
+use std::time::Duration;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
@@ -7,10 +8,10 @@ use gitrust_server::WebSource;
 use include_dir::{Dir, include_dir};
 
 /// WASM bundle baked in at compile time. `build.rs` ensures the dir exists
-/// (an empty bundle is OK — the server just 404s on `/`); a real bundle is
-/// produced by `make web` and lives in `crates/gitrust-web/dist/`.
-static EMBEDDED_BUNDLE: Dir<'_> =
-    include_dir!("$CARGO_MANIFEST_DIR/../gitrust-web/dist");
+/// (an empty bundle is OK — the server detects that case at startup); a
+/// real bundle is produced by `make web` and lives in
+/// `crates/gitrust-web/dist/`.
+static EMBEDDED_BUNDLE: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/../gitrust-web/dist");
 
 #[derive(Parser)]
 #[command(version, about = "gitrust — Rust GUI git client (web + native)")]
@@ -30,27 +31,81 @@ enum Command {
         #[arg(long)]
         web_dist: Option<PathBuf>,
     },
-    App,
+    /// Open the UI in a native window. Falls back to printing a URL on
+    /// platforms without a usable webview (headless build, no display).
+    App {
+        #[arg(long, default_value = "127.0.0.1:3737")]
+        addr: SocketAddr,
+        /// Skip the window; just run the server and print the URL.
+        #[arg(long)]
+        no_window: bool,
+    },
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
+fn main() -> Result<()> {
+    init_tracing();
+    let cli = Cli::parse();
+    match cli.command {
+        Command::Serve { addr, web_dist } => {
+            let rt = tokio::runtime::Runtime::new()?;
+            rt.block_on(async {
+                let source = pick_web_source(web_dist);
+                gitrust_server::serve(addr, source).await
+            })?;
+            Ok(())
+        }
+        Command::App { addr, no_window } => run_app(addr, no_window),
+    }
+}
+
+fn init_tracing() {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
                 .unwrap_or_else(|_| "info,gitrust=debug,gitrust_server=debug".into()),
         )
         .init();
+}
 
-    let cli = Cli::parse();
-    match cli.command {
-        Command::Serve { addr, web_dist } => {
-            let source = pick_web_source(web_dist);
-            gitrust_server::serve(addr, source).await?;
+fn run_app(addr: SocketAddr, no_window: bool) -> Result<()> {
+    let rt = tokio::runtime::Runtime::new()?;
+    let source = pick_web_source(None);
+    let server_handle = rt.spawn(async move { gitrust_server::serve(addr, source).await });
+    rt.block_on(wait_listening(addr))?;
+    let url = format!("http://{addr}");
+
+    if !no_window && desktop_supported() {
+        match open_window(&url) {
+            // The successful path enters tao's event loop and never returns;
+            // process exits when the window is closed.
+            Err(e) => {
+                tracing::warn!("native window unavailable ({e}); falling back to URL mode");
+            }
+            #[allow(unreachable_patterns)]
+            Ok(()) => return Ok(()),
         }
-        Command::App => anyhow::bail!("`gitrust app` not implemented yet"),
     }
+
+    print_url_banner(&url);
+    rt.block_on(server_handle)??;
     Ok(())
+}
+
+async fn wait_listening(addr: SocketAddr) -> Result<()> {
+    for _ in 0..100 {
+        if tokio::net::TcpStream::connect(addr).await.is_ok() {
+            return Ok(());
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    anyhow::bail!("server did not start listening on {addr}")
+}
+
+fn print_url_banner(url: &str) {
+    println!();
+    println!("  gitrust ready at {url}");
+    println!("  Open this URL in a browser. Ctrl+C to stop.");
+    println!();
 }
 
 fn pick_web_source(disk: Option<PathBuf>) -> WebSource {
@@ -74,4 +129,54 @@ fn pick_web_source(disk: Option<PathBuf>) -> WebSource {
 
 fn count_files(dir: &Dir<'_>) -> usize {
     dir.files().count() + dir.dirs().map(count_files).sum::<usize>()
+}
+
+fn desktop_supported() -> bool {
+    #[cfg(not(feature = "desktop"))]
+    {
+        false
+    }
+    #[cfg(feature = "desktop")]
+    {
+        #[cfg(target_os = "linux")]
+        {
+            std::env::var("DISPLAY").is_ok() || std::env::var("WAYLAND_DISPLAY").is_ok()
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            true
+        }
+    }
+}
+
+#[cfg(feature = "desktop")]
+fn open_window(url: &str) -> Result<()> {
+    use tao::event::{Event, WindowEvent};
+    use tao::event_loop::{ControlFlow, EventLoop};
+    use tao::window::WindowBuilder;
+    use wry::WebViewBuilder;
+
+    let event_loop = EventLoop::new();
+    let window = WindowBuilder::new()
+        .with_title("gitrust")
+        .with_inner_size(tao::dpi::LogicalSize::new(1280.0, 800.0))
+        .build(&event_loop)?;
+    let _webview = WebViewBuilder::new(&window).with_url(url).build()?;
+    event_loop.run(move |event, _, control_flow| {
+        *control_flow = ControlFlow::Wait;
+        if let Event::WindowEvent {
+            event: WindowEvent::CloseRequested,
+            ..
+        } = event
+        {
+            *control_flow = ControlFlow::Exit;
+        }
+    });
+}
+
+#[cfg(not(feature = "desktop"))]
+fn open_window(_url: &str) -> Result<()> {
+    anyhow::bail!(
+        "`desktop` feature not compiled in — use --no-window or rebuild with `--features desktop`"
+    )
 }

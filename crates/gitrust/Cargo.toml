@@ -16,3 +16,13 @@ tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 anyhow = { workspace = true }
 include_dir = { workspace = true }
+tao = { version = "0.35", optional = true }
+wry = { version = "0.55", optional = true }
+
+[features]
+default = []
+# Enable a native desktop window via wry (webview) + tao (event loop).
+# Pulls in system deps (webkit2gtk + libsoup on Linux, WebView2 on Windows,
+# WKWebView on macOS — built-in). Off by default so headless / dev builds
+# work without those libs.
+desktop = ["dep:tao", "dep:wry"]

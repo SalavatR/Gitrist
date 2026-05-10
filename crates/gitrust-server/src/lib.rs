@@ -166,9 +166,8 @@ pub fn router(source: WebSource) -> Router {
             app = app.fallback_service(ServeDir::new(dist));
         }
         WebSource::Embedded(bundle) => {
-            app = app.fallback(move |uri: axum::http::Uri| async move {
-                serve_embedded(uri, bundle)
-            });
+            app = app
+                .fallback(move |uri: axum::http::Uri| async move { serve_embedded(uri, bundle) });
         }
         WebSource::None => {}
     }
