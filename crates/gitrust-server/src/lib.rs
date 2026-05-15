@@ -2,6 +2,7 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 
 use axum::{Json, Router, extract::Query, http::StatusCode, response::IntoResponse, routing::get};
+use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 use tower_http::services::ServeDir;
 use tower_http::trace::TraceLayer;
@@ -119,6 +120,121 @@ async fn repo_diff_working(Query(q): Query<DiffWorkingQuery>) -> Result<Json<Fil
         .map_err(ApiError::from)
 }
 
+/// Live filesystem-event stream for a single repo. Client opens a WebSocket
+/// and gets debounced, deduplicated event kinds (`head_changed`,
+/// `refs_changed`, `index_changed`, `worktree_changed`) as JSON text frames.
+/// Noisy paths (`.git/objects`, `.git/lfs`, `*.lock`) are filtered out.
+async fn repo_events(
+    Query(q): Query<PathQuery>,
+    ws: axum::extract::WebSocketUpgrade,
+) -> axum::response::Response {
+    let repo = PathBuf::from(q.path);
+    ws.on_upgrade(move |socket| async move {
+        if let Err(e) = run_event_stream(socket, repo).await {
+            tracing::warn!("event stream ended: {e:#}");
+        }
+    })
+}
+
+async fn run_event_stream(
+    socket: axum::extract::ws::WebSocket,
+    repo: PathBuf,
+) -> anyhow::Result<()> {
+    use axum::extract::ws::Message;
+    use futures::SinkExt;
+    use notify::{RecursiveMode, Watcher};
+
+    // notify normalizes event paths; do the same to `repo` so `strip_prefix` succeeds.
+    let repo = std::fs::canonicalize(&repo).unwrap_or(repo);
+
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<notify::Event>();
+    let mut watcher = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
+        if let Ok(event) = res {
+            let _ = tx.send(event);
+        }
+    })?;
+    watcher.watch(&repo, RecursiveMode::Recursive)?;
+
+    let (mut sink, mut stream) = socket.split();
+    let mut pending: std::collections::HashSet<&'static str> = std::collections::HashSet::new();
+    let mut flush_due: Option<tokio::time::Instant> = None;
+
+    loop {
+        let timer = async {
+            match flush_due {
+                Some(t) => tokio::time::sleep_until(t).await,
+                None => std::future::pending::<()>().await,
+            }
+        };
+
+        tokio::select! {
+            event = rx.recv() => {
+                let Some(event) = event else { break };
+                let kinds = categorize(&event, &repo);
+                if !kinds.is_empty() {
+                    for kind in kinds {
+                        pending.insert(kind);
+                    }
+                    flush_due.get_or_insert_with(|| {
+                        tokio::time::Instant::now() + std::time::Duration::from_millis(150)
+                    });
+                }
+            }
+            _ = timer => {
+                for kind in pending.drain() {
+                    let msg = serde_json::json!({ "kind": kind }).to_string();
+                    if sink.send(Message::Text(msg.into())).await.is_err() {
+                        return Ok(());
+                    }
+                }
+                flush_due = None;
+            }
+            client = stream.next() => {
+                // Client closed or sent something unexpected — exit cleanly.
+                if matches!(client, None | Some(Err(_)) | Some(Ok(Message::Close(_)))) {
+                    break;
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Map a raw fs event to one or more high-level categories. A single event
+/// can touch multiple paths (e.g. renames), so the result is a deduplicated
+/// list. Returns empty for noisy paths the UI doesn't care about (object
+/// database churn, transient `*.lock`, LFS staging).
+fn categorize(event: &notify::Event, repo: &std::path::Path) -> Vec<&'static str> {
+    let mut kinds: Vec<&'static str> = Vec::new();
+    let mut push = |kind: &'static str| {
+        if !kinds.contains(&kind) {
+            kinds.push(kind);
+        }
+    };
+
+    for path in &event.paths {
+        let Ok(rel) = path.strip_prefix(repo) else {
+            continue;
+        };
+        let s = rel.to_string_lossy().replace('\\', "/");
+
+        if s.starts_with(".git/objects/") || s.ends_with(".lock") || s.starts_with(".git/lfs/") {
+            continue;
+        }
+
+        if s == ".git/HEAD" {
+            push("head_changed");
+        } else if s.starts_with(".git/refs/") || s == ".git/packed-refs" {
+            push("refs_changed");
+        } else if s == ".git/index" {
+            push("index_changed");
+        } else if !s.starts_with(".git/") && !s.is_empty() {
+            push("worktree_changed");
+        }
+    }
+    kinds
+}
+
 struct ApiError(anyhow::Error);
 
 impl From<anyhow::Error> for ApiError {
@@ -158,7 +274,8 @@ pub fn router(source: WebSource) -> Router {
         .route("/repo/tree", get(repo_tree))
         .route("/repo/blob", get(repo_blob))
         .route("/repo/diff", get(repo_diff))
-        .route("/repo/diff/working", get(repo_diff_working));
+        .route("/repo/diff/working", get(repo_diff_working))
+        .route("/repo/events", get(repo_events));
 
     let mut app = Router::new().nest("/api", api);
     match source {
@@ -223,4 +340,76 @@ pub async fn serve(addr: SocketAddr, source: WebSource) -> anyhow::Result<()> {
     );
     axum::serve(listener, router(source)).await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::categorize;
+    use notify::{Event, EventKind};
+    use std::path::{Path, PathBuf};
+
+    fn ev(repo: &Path, rels: &[&str]) -> Event {
+        Event {
+            kind: EventKind::Modify(notify::event::ModifyKind::Any),
+            paths: rels.iter().map(|r| repo.join(r)).collect(),
+            attrs: Default::default(),
+        }
+    }
+
+    #[test]
+    fn categorizes_known_paths() {
+        let repo = PathBuf::from("/r");
+        assert_eq!(categorize(&ev(&repo, &[".git/HEAD"]), &repo), vec!["head_changed"]);
+        assert_eq!(
+            categorize(&ev(&repo, &[".git/refs/heads/master"]), &repo),
+            vec!["refs_changed"],
+        );
+        assert_eq!(
+            categorize(&ev(&repo, &[".git/packed-refs"]), &repo),
+            vec!["refs_changed"],
+        );
+        assert_eq!(categorize(&ev(&repo, &[".git/index"]), &repo), vec!["index_changed"]);
+        assert_eq!(
+            categorize(&ev(&repo, &["src/main.rs"]), &repo),
+            vec!["worktree_changed"],
+        );
+    }
+
+    #[test]
+    fn filters_noise() {
+        let repo = PathBuf::from("/r");
+        assert!(categorize(&ev(&repo, &[".git/objects/ab/cdef"]), &repo).is_empty());
+        assert!(categorize(&ev(&repo, &[".git/index.lock"]), &repo).is_empty());
+        assert!(categorize(&ev(&repo, &[".git/lfs/objects/aa/bb/cc"]), &repo).is_empty());
+        assert!(categorize(&ev(&repo, &[]), &repo).is_empty());
+    }
+
+    #[test]
+    fn collects_multiple_kinds_from_one_event() {
+        let repo = PathBuf::from("/r");
+        let mut out = categorize(&ev(&repo, &[".git/HEAD", "src/main.rs"]), &repo);
+        out.sort();
+        assert_eq!(out, vec!["head_changed", "worktree_changed"]);
+    }
+
+    #[test]
+    fn deduplicates_within_one_event() {
+        let repo = PathBuf::from("/r");
+        let out = categorize(
+            &ev(&repo, &[".git/refs/heads/master", ".git/refs/heads/dev"]),
+            &repo,
+        );
+        assert_eq!(out, vec!["refs_changed"]);
+    }
+
+    #[test]
+    fn ignores_paths_outside_repo() {
+        let repo = PathBuf::from("/r");
+        let ev = Event {
+            kind: EventKind::Any,
+            paths: vec![PathBuf::from("/elsewhere/file")],
+            attrs: Default::default(),
+        };
+        assert!(categorize(&ev, &repo).is_empty());
+    }
 }
