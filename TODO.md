@@ -65,29 +65,49 @@ within each section.
 
 ## Writes (need auth first)
 
-- [ ] Auth: signed cookie generated at first launch, required for all
-      write endpoints. Reads stay open (server is `localhost`-only
-      by default).
-- [ ] `POST /api/repo/stage`, `POST /api/repo/unstage`.
-- [ ] `POST /api/repo/commit { message, author? }`.
+- [x] Auth: 32-byte random token generated at first launch, written
+      to `$XDG_CONFIG_HOME/gitrust/token` (mode 0600 on unix). The
+      UI fetches it via `GET /api/auth/token` and rides it as
+      `Authorization: Bearer <token>` on all writes. Reads stay
+      open (server is `localhost`-only by default).
+- [x] `POST /api/repo/stage`, `POST /api/repo/unstage` — JSON body
+      `{ path, files }`. Sidebar "Working tree" gets a `+` button
+      per file and "Staged" gets `−` buttons; both hidden behind
+      the bearer gate.
+- [x] `POST /api/repo/commit { path, message }`. Returns `{ oid }`.
+      Author identity comes from the repo's gitconfig. UI exposes
+      it as a textarea + Commit button between the summary card
+      and the history table; disabled when nothing is staged.
 - [ ] Branch ops: create, rename, delete, checkout.
-- [ ] Discard worktree changes for a file.
+- [ ] Discard worktree changes for a file (`git restore <file>`).
+- [ ] Commit body / author override on the commit endpoint.
 
 ## UX
 
-- [ ] Persist last-used repo path in `localStorage`; use it on load
-      instead of the hardcoded `DEFAULT_REPO`.
-- [ ] Recent-repos quick-switch list.
-- [ ] Encode current repo path in URL hash so browser back/forward
-      and bookmarks work.
+- [x] Persist last-used repo path in `localStorage` (`gitrust.repo`);
+      first load reads it, falling back to `DEFAULT_REPO` only on
+      a fresh install.
+- [x] Recent-repos quick-switch list — every time `current_repo`
+      changes, the path is prepended (deduped, capped at 8) to
+      `gitrust.repos` and rendered as a `<datalist>` next to the
+      repo input. Browser-native suggestions.
+- [x] Encode current repo path in URL hash so browser back/forward
+      and bookmarks work. `persist_repo` writes both localStorage
+      and `window.location.hash` (URL-encoded).
 - [x] Stale-while-revalidate: mirror Signals shadow the three
       main-panel resources; clicks on commits/files/blobs hold the
       previous content visible until the new fetch lands.
 - [x] Time column: relative ("3h ago") in the log; absolute RFC3339
       goes into the `title` attribute for hover. Detail-panel still
       shows absolute since you've drilled in for precision.
-- [ ] Error states with a retry button.
-- [ ] Manual light/dark toggle in addition to `color-scheme: light dark`.
+- [x] Error states with a retry button. Each `render_*` with an
+      error branch takes the underlying `Resource<…>` by value and
+      renders an inline `Retry` button that calls `.restart()` on
+      click.
+- [x] Manual light/dark toggle in topbar. Cycles Auto → Light →
+      Dark; choice persists in `localStorage` and reflects on
+      `<html data-theme=…>`. Auto falls back to
+      `prefers-color-scheme`.
 
 ## Native shell
 
@@ -109,10 +129,10 @@ within each section.
 
 ## Infrastructure
 
-- [ ] `gitrust-types` crate: extract `RepoSummary`, `CommitInfo`,
-      `StatusEntry`, `BranchInfo` (and future shapes) from both core
-      and ui into a shared, target-independent crate. Trigger when
-      duplication starts hurting.
+- [x] `gitrust-types` crate: wire-shape structs
+      (`RepoSummary`, `CommitInfo`, `StatusEntry`, `BranchInfo`,
+      `FileDiff`, `BlobView`, …) shared between server and UI.
+      Pure serde, target-independent.
 - [x] Push-based refresh: server watches FS via `notify` and pushes
       debounced event kinds (`head_changed`, `refs_changed`,
       `index_changed`, `worktree_changed`) over `/api/repo/events`
@@ -127,7 +147,9 @@ within each section.
       previous 2 s/10 s polling stays as a silent fallback.
 - [ ] Structured error envelope: `{ error, code, hint? }` instead of
       a free-form message.
-- [ ] CI: cargo check (native + wasm32), `fmt --check`, `clippy -D warnings`.
+- [x] CI: cargo check (native + wasm32), `fmt --check`, `clippy -D
+      warnings`. GitHub Actions on Linux/macOS/Windows + GitLab
+      mirror on Linux.
 - [x] Tests: `gitrust-core` has integration tests for every read-API
       function (10 tests, fresh repo per case via tempdir + `git`
       CLI). `gitrust-server` adds 7 HTTP tests through `reqwest`
