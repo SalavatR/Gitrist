@@ -16,6 +16,12 @@ pub(crate) const REFS_POLL_INTERVAL_MS: u32 = 10_000;
 const REPO_STORAGE_KEY: &str = "gitrust.repo";
 #[cfg(target_arch = "wasm32")]
 const VIEW_MODE_STORAGE_KEY: &str = "gitrust.view_mode";
+#[cfg(target_arch = "wasm32")]
+const RECENT_REPOS_STORAGE_KEY: &str = "gitrust.repos";
+/// Cap on the recent-repos quick-switch list — keep enough for a
+/// useful dropdown but small enough to scan at a glance.
+#[cfg(target_arch = "wasm32")]
+const RECENT_REPOS_MAX: usize = 8;
 
 #[cfg(target_arch = "wasm32")]
 pub(crate) fn initial_repo() -> String {
@@ -81,3 +87,36 @@ pub(crate) fn persist_side_by_side(side_by_side: bool) {
 
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn persist_side_by_side(_side_by_side: bool) {}
+
+/// Read the recent-repos list from localStorage, freshest first.
+/// Returns an empty list on native or when no list has been recorded.
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn recent_repos() -> Vec<String> {
+    use gloo_storage::Storage;
+    gloo_storage::LocalStorage::get::<Vec<String>>(RECENT_REPOS_STORAGE_KEY).unwrap_or_default()
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn recent_repos() -> Vec<String> {
+    Vec::new()
+}
+
+/// Move `path` to the front of the recent list, dedup, and cap the
+/// total at `RECENT_REPOS_MAX`. Called every time the active repo
+/// changes so the freshest entry is always at index 0.
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn record_recent_repo(path: &str) {
+    use gloo_storage::Storage;
+    if path.is_empty() {
+        return;
+    }
+    let mut list: Vec<String> =
+        gloo_storage::LocalStorage::get(RECENT_REPOS_STORAGE_KEY).unwrap_or_default();
+    list.retain(|p| p != path);
+    list.insert(0, path.to_string());
+    list.truncate(RECENT_REPOS_MAX);
+    let _ = gloo_storage::LocalStorage::set(RECENT_REPOS_STORAGE_KEY, &list);
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn record_recent_repo(_path: &str) {}

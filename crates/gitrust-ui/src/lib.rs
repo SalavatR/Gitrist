@@ -25,7 +25,7 @@ use sidebar::{
 };
 use state::{
     BlobSelection, LOG_LIMIT, REFS_POLL_INTERVAL_MS, STATUS_POLL_INTERVAL_MS, initial_repo,
-    initial_side_by_side, persist_repo, persist_side_by_side,
+    initial_side_by_side, persist_repo, persist_side_by_side, recent_repos, record_recent_repo,
 };
 use time_fmt::sleep_ms;
 
@@ -38,10 +38,13 @@ pub fn App() -> Element {
     let selected_file = use_signal(|| None::<String>);
     let selected_blob = use_signal(|| None::<BlobSelection>);
     let mut side_by_side = use_signal(initial_side_by_side);
+    let mut recent = use_signal(recent_repos);
 
     use_effect(move || {
         let path = current_repo.read().clone();
         persist_repo(&path);
+        record_recent_repo(&path);
+        recent.set(recent_repos());
     });
     use_effect(move || {
         let sbs = *side_by_side.read();
@@ -183,7 +186,13 @@ pub fn App() -> Element {
                         spellcheck: "false",
                         autocapitalize: "off",
                         autocomplete: "off",
+                        list: "recent-repos",
                         oninput: move |e| draft_repo.set(e.value()),
+                    }
+                    datalist { id: "recent-repos",
+                        for r in recent.read().iter().cloned() {
+                            option { key: "{r}", value: "{r}" }
+                        }
                     }
                     button { r#type: "submit", "Load" }
                 }
