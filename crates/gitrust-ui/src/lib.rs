@@ -205,28 +205,34 @@ pub fn App() -> Element {
                             span { "Branches" }
                             {render_branch_count(&branches.read_unchecked())}
                         }
-                        {render_branches(&branches.read_unchecked())}
+                        {render_branches(&branches.read_unchecked(), branches)}
                     }
                     section { class: "side-block",
                         div { class: "side-title",
                             span { "Remotes" }
                             {render_remote_count(&remotes.read_unchecked())}
                         }
-                        {render_remotes(&remotes.read_unchecked())}
+                        {render_remotes(&remotes.read_unchecked(), remotes)}
                     }
                     section { class: "side-block",
                         div { class: "side-title",
                             span { "Tags" }
                             {render_tag_count(&tags.read_unchecked())}
                         }
-                        {render_tags(&tags.read_unchecked())}
+                        {render_tags(&tags.read_unchecked(), tags)}
                     }
                     section { class: "side-block",
                         div { class: "side-title",
                             span { "Working tree" }
                             {render_status_count(&status.read_unchecked())}
                         }
-                        {render_status(&status.read_unchecked(), selected_oid, selected_file, selected_blob)}
+                        {render_status(
+                            &status.read_unchecked(),
+                            status,
+                            selected_oid,
+                            selected_file,
+                            selected_blob,
+                        )}
                     }
                     section { class: "side-block",
                         div { class: "side-title",
@@ -235,6 +241,7 @@ pub fn App() -> Element {
                         }
                         {render_tree(
                             &tree.read_unchecked(),
+                            tree,
                             selected_oid,
                             selected_file,
                             selected_blob,
@@ -243,11 +250,17 @@ pub fn App() -> Element {
                 }
 
                 main { class: "main",
-                    {render_summary_card(&summary.read_unchecked())}
+                    {render_summary_card(&summary.read_unchecked(), summary)}
 
                     section { class: "main-block",
                         h2 { "History" }
-                        {render_log(&log.read_unchecked(), selected_oid, selected_file, selected_blob)}
+                        {render_log(
+                            &log.read_unchecked(),
+                            log,
+                            selected_oid,
+                            selected_file,
+                            selected_blob,
+                        )}
                     }
 
                     section { class: "main-block",
@@ -270,8 +283,11 @@ pub fn App() -> Element {
                         }
                         {render_detail(
                             &diff_stale.read_unchecked(),
+                            diff,
                             &working_diff_stale.read_unchecked(),
+                            working_diff,
                             &blob_view_stale.read_unchecked(),
+                            blob_view,
                             selected_oid,
                             selected_file,
                             selected_blob,

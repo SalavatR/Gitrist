@@ -10,7 +10,10 @@ use crate::diff::{render_file_diff, render_line_content};
 use crate::state::BlobSelection;
 use crate::time_fmt::{format_time, format_time_relative};
 
-pub(crate) fn render_summary_card(state: &Option<Result<RepoSummary, String>>) -> Element {
+pub(crate) fn render_summary_card(
+    state: &Option<Result<RepoSummary, String>>,
+    mut res: Resource<Result<RepoSummary, String>>,
+) -> Element {
     match state {
         Some(Ok(s)) => {
             let branch = s.head_ref.as_deref().unwrap_or("(detached)").to_string();
@@ -32,7 +35,12 @@ pub(crate) fn render_summary_card(state: &Option<Result<RepoSummary, String>>) -
         }
         Some(Err(e)) => {
             let msg = e.clone();
-            rsx! { section { class: "summary-card error", "Error: {msg}" } }
+            rsx! {
+                section { class: "summary-card error",
+                    "Error: {msg} "
+                    button { class: "retry-btn", onclick: move |_| res.restart(), "Retry" }
+                }
+            }
         }
         None => rsx! { section { class: "summary-card muted", "Loading…" } },
     }
@@ -40,6 +48,7 @@ pub(crate) fn render_summary_card(state: &Option<Result<RepoSummary, String>>) -
 
 pub(crate) fn render_log(
     state: &Option<Result<Vec<CommitInfo>, String>>,
+    mut res: Resource<Result<Vec<CommitInfo>, String>>,
     selected_oid: Signal<Option<String>>,
     selected_file: Signal<Option<String>>,
     selected_blob: Signal<Option<BlobSelection>>,
@@ -70,7 +79,12 @@ pub(crate) fn render_log(
         }
         Some(Err(e)) => {
             let msg = e.clone();
-            rsx! { p { class: "err", "Error: {msg}" } }
+            rsx! {
+                p { class: "err",
+                    "Error: {msg} "
+                    button { class: "retry-btn", onclick: move |_| res.restart(), "Retry" }
+                }
+            }
         }
         None => rsx! { p { class: "muted", "Loading…" } },
     }
@@ -107,28 +121,35 @@ fn render_commit_row(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn render_detail(
     commit_state: &Option<Result<Option<CommitDiff>, String>>,
+    commit_res: Resource<Result<Option<CommitDiff>, String>>,
     working_state: &Option<Result<Option<FileDiff>, String>>,
+    working_res: Resource<Result<Option<FileDiff>, String>>,
     blob_state: &Option<Result<Option<BlobView>, String>>,
+    blob_res: Resource<Result<Option<BlobView>, String>>,
     selected_oid: Signal<Option<String>>,
     selected_file: Signal<Option<String>>,
     selected_blob: Signal<Option<BlobSelection>>,
     side_by_side: bool,
 ) -> Element {
     if selected_blob.read().is_some() {
-        return render_blob_viewer(blob_state);
+        return render_blob_viewer(blob_state, blob_res);
     }
     if let Some(file) = selected_file.read().clone() {
-        return render_working_detail(working_state, &file, side_by_side);
+        return render_working_detail(working_state, working_res, &file, side_by_side);
     }
     if selected_oid.read().is_some() {
-        return render_commit_detail(commit_state, side_by_side);
+        return render_commit_detail(commit_state, commit_res, side_by_side);
     }
     rsx! { p { class: "muted", "Select a commit, status entry, or file to inspect." } }
 }
 
-fn render_blob_viewer(state: &Option<Result<Option<BlobView>, String>>) -> Element {
+fn render_blob_viewer(
+    state: &Option<Result<Option<BlobView>, String>>,
+    mut res: Resource<Result<Option<BlobView>, String>>,
+) -> Element {
     match state {
         Some(Ok(Some(b))) => {
             let path = b.path.clone();
@@ -159,7 +180,12 @@ fn render_blob_viewer(state: &Option<Result<Option<BlobView>, String>>) -> Eleme
         Some(Ok(None)) | None => rsx! { p { class: "muted", "Loading…" } },
         Some(Err(e)) => {
             let msg = e.clone();
-            rsx! { p { class: "err", "Error: {msg}" } }
+            rsx! {
+                p { class: "err",
+                    "Error: {msg} "
+                    button { class: "retry-btn", onclick: move |_| res.restart(), "Retry" }
+                }
+            }
         }
     }
 }
@@ -178,6 +204,7 @@ fn render_blob_line(l: BlobLine) -> Element {
 
 fn render_working_detail(
     state: &Option<Result<Option<FileDiff>, String>>,
+    mut res: Resource<Result<Option<FileDiff>, String>>,
     file: &str,
     side_by_side: bool,
 ) -> Element {
@@ -201,13 +228,19 @@ fn render_working_detail(
         Some(Ok(None)) | None => rsx! { p { class: "muted", "Loading…" } },
         Some(Err(e)) => {
             let msg = e.clone();
-            rsx! { p { class: "err", "Error: {msg}" } }
+            rsx! {
+                p { class: "err",
+                    "Error: {msg} "
+                    button { class: "retry-btn", onclick: move |_| res.restart(), "Retry" }
+                }
+            }
         }
     }
 }
 
 fn render_commit_detail(
     state: &Option<Result<Option<CommitDiff>, String>>,
+    mut res: Resource<Result<Option<CommitDiff>, String>>,
     side_by_side: bool,
 ) -> Element {
     match state {
@@ -256,7 +289,12 @@ fn render_commit_detail(
         Some(Ok(None)) | None => rsx! { p { class: "muted", "Loading…" } },
         Some(Err(e)) => {
             let msg = e.clone();
-            rsx! { p { class: "err", "Error: {msg}" } }
+            rsx! {
+                p { class: "err",
+                    "Error: {msg} "
+                    button { class: "retry-btn", onclick: move |_| res.restart(), "Retry" }
+                }
+            }
         }
     }
 }

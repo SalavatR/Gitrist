@@ -60,6 +60,7 @@ fn count_blobs(entries: &[TreeEntry]) -> usize {
 
 pub(crate) fn render_tree(
     state: &Option<Result<Vec<TreeEntry>, String>>,
+    mut res: Resource<Result<Vec<TreeEntry>, String>>,
     selected_oid: Signal<Option<String>>,
     selected_file: Signal<Option<String>>,
     selected_blob: Signal<Option<BlobSelection>>,
@@ -80,7 +81,12 @@ pub(crate) fn render_tree(
         }
         Some(Err(e)) => {
             let msg = e.clone();
-            rsx! { p { class: "err small", "Error: {msg}" } }
+            rsx! {
+                p { class: "err small",
+                    "Error: {msg} "
+                    button { class: "retry-btn", onclick: move |_| res.restart(), "Retry" }
+                }
+            }
         }
         None => rsx! { p { class: "muted small", "Loading…" } },
     }
@@ -163,7 +169,10 @@ pub(crate) fn render_status_count(state: &Option<Result<Vec<StatusEntry>, String
     }
 }
 
-pub(crate) fn render_branches(state: &Option<Result<Vec<BranchInfo>, String>>) -> Element {
+pub(crate) fn render_branches(
+    state: &Option<Result<Vec<BranchInfo>, String>>,
+    mut res: Resource<Result<Vec<BranchInfo>, String>>,
+) -> Element {
     match state {
         Some(Ok(branches)) if branches.is_empty() => {
             rsx! { p { class: "muted small", "No local branches." } }
@@ -191,13 +200,21 @@ pub(crate) fn render_branches(state: &Option<Result<Vec<BranchInfo>, String>>) -
         }
         Some(Err(e)) => {
             let msg = e.clone();
-            rsx! { p { class: "err small", "Error: {msg}" } }
+            rsx! {
+                p { class: "err small",
+                    "Error: {msg} "
+                    button { class: "retry-btn", onclick: move |_| res.restart(), "Retry" }
+                }
+            }
         }
         None => rsx! { p { class: "muted small", "Loading…" } },
     }
 }
 
-pub(crate) fn render_tags(state: &Option<Result<Vec<TagInfo>, String>>) -> Element {
+pub(crate) fn render_tags(
+    state: &Option<Result<Vec<TagInfo>, String>>,
+    mut res: Resource<Result<Vec<TagInfo>, String>>,
+) -> Element {
     match state {
         Some(Ok(tags)) if tags.is_empty() => {
             rsx! { p { class: "muted small", "No tags." } }
@@ -228,13 +245,21 @@ pub(crate) fn render_tags(state: &Option<Result<Vec<TagInfo>, String>>) -> Eleme
         }
         Some(Err(e)) => {
             let msg = e.clone();
-            rsx! { p { class: "err small", "Error: {msg}" } }
+            rsx! {
+                p { class: "err small",
+                    "Error: {msg} "
+                    button { class: "retry-btn", onclick: move |_| res.restart(), "Retry" }
+                }
+            }
         }
         None => rsx! { p { class: "muted small", "Loading…" } },
     }
 }
 
-pub(crate) fn render_remotes(state: &Option<Result<Vec<RemoteBranchInfo>, String>>) -> Element {
+pub(crate) fn render_remotes(
+    state: &Option<Result<Vec<RemoteBranchInfo>, String>>,
+    mut res: Resource<Result<Vec<RemoteBranchInfo>, String>>,
+) -> Element {
     match state {
         Some(Ok(rems)) if rems.is_empty() => {
             rsx! { p { class: "muted small", "No remote-tracking branches." } }
@@ -262,7 +287,12 @@ pub(crate) fn render_remotes(state: &Option<Result<Vec<RemoteBranchInfo>, String
         }
         Some(Err(e)) => {
             let msg = e.clone();
-            rsx! { p { class: "err small", "Error: {msg}" } }
+            rsx! {
+                p { class: "err small",
+                    "Error: {msg} "
+                    button { class: "retry-btn", onclick: move |_| res.restart(), "Retry" }
+                }
+            }
         }
         None => rsx! { p { class: "muted small", "Loading…" } },
     }
@@ -270,6 +300,7 @@ pub(crate) fn render_remotes(state: &Option<Result<Vec<RemoteBranchInfo>, String
 
 pub(crate) fn render_status(
     state: &Option<Result<Vec<StatusEntry>, String>>,
+    mut res: Resource<Result<Vec<StatusEntry>, String>>,
     mut selected_oid: Signal<Option<String>>,
     mut selected_file: Signal<Option<String>>,
     mut selected_blob: Signal<Option<BlobSelection>>,
@@ -315,7 +346,12 @@ pub(crate) fn render_status(
         }
         Some(Err(e)) => {
             let msg = e.clone();
-            rsx! { p { class: "err small", "Error: {msg}" } }
+            rsx! {
+                p { class: "err small",
+                    "Error: {msg} "
+                    button { class: "retry-btn", onclick: move |_| res.restart(), "Retry" }
+                }
+            }
         }
         None => rsx! { p { class: "muted small", "Loading…" } },
     }

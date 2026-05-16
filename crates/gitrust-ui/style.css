@@ -695,6 +695,22 @@ details.file-diff[open] .disclosure::before { content: "▾"; }
 .muted.small { font-size: 0.85rem; }
 .err { color: var(--del); }
 .err.small { font-size: 0.85rem; }
+.retry-btn {
+  margin-left: 0.35rem;
+  padding: 0.1rem 0.55rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  color: var(--text);
+  cursor: pointer;
+  font-size: 0.78rem;
+  font-weight: 500;
+}
+.retry-btn:hover {
+  background: var(--accent-bg);
+  border-color: var(--accent);
+  color: var(--accent);
+}
 
 .footbar {
   border-top: 1px solid var(--border);
