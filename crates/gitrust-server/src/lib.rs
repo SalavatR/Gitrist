@@ -521,6 +521,22 @@ fn generate_token() -> String {
     out
 }
 
+/// Slap `Cache-Control: no-store` on every API response. Without it,
+/// browsers were silently serving cached JSON for endpoints like
+/// `/api/repo/branches` — `branches.restart()` after a WS-pushed
+/// `refs_changed` would re-fetch but get the same bytes back, the
+/// signal would treat the value as unchanged, and the sidebar
+/// wouldn't reflect a freshly-created branch until a full page
+/// reload.
+async fn no_store(req: axum::extract::Request, next: middleware::Next) -> axum::response::Response {
+    let mut resp = next.run(req).await;
+    resp.headers_mut().insert(
+        axum::http::header::CACHE_CONTROL,
+        axum::http::HeaderValue::from_static("no-store"),
+    );
+    resp
+}
+
 /// Middleware that gates every endpoint except `/api/health`. Accepts the
 /// token from either:
 /// - `Authorization: Bearer <token>` — what reqwest and the in-browser
@@ -590,7 +606,10 @@ pub fn router(source: WebSource, auth: AuthState) -> Router {
         .route("/repo/checkout", post(repo_checkout))
         .route_layer(middleware::from_fn_with_state(auth.clone(), require_auth));
 
-    let api = open.merge(protected).with_state(auth);
+    let api = open
+        .merge(protected)
+        .layer(middleware::from_fn(no_store))
+        .with_state(auth);
 
     let mut app = Router::new().nest("/api", api);
     match source {
