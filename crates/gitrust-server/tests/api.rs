@@ -317,6 +317,47 @@ async fn commit_with_auth_creates_new_commit() {
 }
 
 #[tokio::test]
+async fn commit_get_resolves_by_oid() {
+    let (server, r) = setup_with_initial_commit().await;
+    let oid = r.git(&["rev-parse", "HEAD"]).trim().to_string();
+    let (status, body) = get_json(
+        &server,
+        "/api/repo/commit",
+        &[("path", r.path().to_str().unwrap()), ("oid", &oid)],
+    )
+    .await;
+    assert_eq!(status, 200);
+    assert_eq!(body["oid"], oid);
+    assert_eq!(body["summary"], "initial");
+}
+
+#[tokio::test]
+async fn commit_post_honours_author_override() {
+    let (server, r) = setup_with_initial_commit().await;
+    r.write("b.txt", "y\n");
+    r.git(&["add", "b.txt"]);
+    let (status, body) = post_json(
+        &server,
+        "/api/repo/commit",
+        Some("test-token"),
+        serde_json::json!({
+            "path": r.path().to_str().unwrap(),
+            "message": "second",
+            "author": "Ghost Writer <ghost@example.com>",
+        }),
+    )
+    .await;
+    assert_eq!(status, 200);
+    let oid = body["oid"].as_str().expect("oid");
+    let author = r.git(&["log", "-1", "--format=%an <%ae>", oid]);
+    assert!(
+        author.trim() == "Ghost Writer <ghost@example.com>",
+        "expected the override author, got `{}`",
+        author.trim()
+    );
+}
+
+#[tokio::test]
 async fn nonexistent_repo_returns_400_with_error_envelope() {
     let server = spawn_server().await;
     let missing = format!("/nonexistent-test-repo-{}", std::process::id());

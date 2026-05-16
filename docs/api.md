@@ -483,7 +483,11 @@ entirely for paths HEAD doesn't carry yet).
 curl -X POST http://127.0.0.1:3737/api/repo/commit \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"path":"/home/me/myrepo","message":"feat: ship the thing"}'
+  -d '{
+    "path":"/home/me/myrepo",
+    "message":"feat: ship the thing\n\nLonger body if you want one.",
+    "author":"Ghost Writer <ghost@example.com>"
+  }'
 ```
 
 ```json
@@ -491,8 +495,37 @@ curl -X POST http://127.0.0.1:3737/api/repo/commit \
 ```
 
 Whatever's currently in the index becomes the new commit. Empty
-or whitespace-only messages return 400. Author identity comes
-from the repo's gitconfig (`user.name`, `user.email`).
+or whitespace-only messages return 400. Newlines inside `message`
+are preserved — git treats the first line as the subject and the
+rest as the body. `author` (optional) overrides the committer
+identity in `Name <email>` form; omit it to inherit from the
+repo's gitconfig.
+
+### `GET /api/repo/commit?path=<path>&oid=<commit-oid>`
+
+Returns the same `CommitInfo` shape as `/api/repo/log` entries
+for a single commit looked up by oid — useful for permalinks
+without re-walking history.
+
+```sh
+curl 'http://127.0.0.1:3737/api/repo/commit?path=/home/me/myrepo&oid=85ea44…' \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+```json
+{
+  "oid": "85ea44373cc77f401b5ea4fc665c08e8c026fbe4",
+  "short_oid": "85ea4437",
+  "summary": "feat: bootstrap workspace",
+  "body": "…",
+  "parents": ["…"],
+  "author_name": "Salavat",
+  "author_email": "s@example.com",
+  "time_unix": 1778270159
+}
+```
+
+A garbage oid returns 400 with a descriptive error envelope.
 
 All three endpoints return 401 on a missing or wrong `Authorization`
 header and 400 with the usual `{ "error": "…" }` envelope on a

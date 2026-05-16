@@ -255,7 +255,7 @@ fn commit_creates_new_commit_with_staged_changes() {
     r.write("seed.txt", "v2\n");
     gitrust_core::stage_files(r.path(), &["seed.txt".to_string()]).unwrap();
 
-    let oid = gitrust_core::commit(r.path(), "second").expect("commit");
+    let oid = gitrust_core::commit(r.path(), "second", None).expect("commit");
     assert_eq!(oid.len(), 40);
 
     let log = gitrust_core::log_commits(r.path(), 10).unwrap();
@@ -335,6 +335,47 @@ fn commit_rejects_empty_message() {
     let r = TestRepo::new();
     r.write("seed.txt", "x\n");
     r.git(&["add", "seed.txt"]);
-    let err = gitrust_core::commit(r.path(), "   ").expect_err("empty message");
+    let err = gitrust_core::commit(r.path(), "   ", None).expect_err("empty message");
     assert!(err.to_string().contains("empty"));
+}
+
+#[test]
+fn commit_honours_author_override() {
+    let r = TestRepo::new();
+    r.write("a", "x");
+    r.git(&["add", "a"]);
+    let oid = gitrust_core::commit(r.path(), "first", Some("Ghost Writer <ghost@example.com>"))
+        .expect("commit");
+    let info = gitrust_core::commit_info(r.path(), &oid).expect("commit_info");
+    assert_eq!(info.author_name, "Ghost Writer");
+    assert_eq!(info.author_email, "ghost@example.com");
+    assert_eq!(info.summary, "first");
+}
+
+#[test]
+fn commit_info_resolves_by_oid() {
+    let r = TestRepo::new();
+    r.write("a", "x");
+    r.git(&["add", "a"]);
+    r.git(&["commit", "-q", "-m", "first"]);
+    let oid = r.git(&["rev-parse", "HEAD"]).trim().to_string();
+    let info = gitrust_core::commit_info(r.path(), &oid).expect("commit_info");
+    assert_eq!(info.oid, oid);
+    assert_eq!(info.summary, "first");
+    assert_eq!(info.author_name, "Test");
+    assert!(info.parents.is_empty());
+}
+
+#[test]
+fn commit_info_rejects_garbage_oid() {
+    let r = TestRepo::new();
+    r.write("a", "x");
+    r.git(&["add", "a"]);
+    r.git(&["commit", "-q", "-m", "first"]);
+    let err = gitrust_core::commit_info(r.path(), "not-a-hex-oid").expect_err("bad oid");
+    assert!(
+        err.to_string().to_lowercase().contains("invalid")
+            || err.to_string().to_lowercase().contains("oid"),
+        "expected helpful oid error, got `{err}`"
+    );
 }

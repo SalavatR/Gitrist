@@ -16,9 +16,9 @@ use tower_http::trace::TraceLayer;
 
 use gitrust_core::{
     BlameView, BlobView, BranchInfo, CommitDiff, CommitInfo, FileDiff, RemoteBranchInfo,
-    RepoSummary, StatusEntry, TagInfo, TreeEntry, blame_file, commit as core_commit, diff_commit,
-    diff_working, list_branches, list_remote_branches, list_staged, list_status, list_tags,
-    list_tree, log_commits, show_blob, stage_files as core_stage_files, summarize_repo,
+    RepoSummary, StatusEntry, TagInfo, TreeEntry, blame_file, commit as core_commit, commit_info,
+    diff_commit, diff_working, list_branches, list_remote_branches, list_staged, list_status,
+    list_tags, list_tree, log_commits, show_blob, stage_files as core_stage_files, summarize_repo,
     unstage_files as core_unstage,
 };
 
@@ -174,16 +174,27 @@ async fn repo_unstage(Json(body): Json<StageBody>) -> Result<StatusCode, ApiErro
 struct CommitBody {
     path: String,
     message: String,
+    #[serde(default)]
+    author: Option<String>,
 }
 
 async fn repo_commit(Json(body): Json<CommitBody>) -> Result<Json<serde_json::Value>, ApiError> {
-    let CommitBody { path, message } = body;
+    let CommitBody {
+        path,
+        message,
+        author,
+    } = body;
     let repo = PathBuf::from(path);
-    let oid = tokio::task::spawn_blocking(move || core_commit(&repo, &message))
+    let oid = tokio::task::spawn_blocking(move || core_commit(&repo, &message, author.as_deref()))
         .await
         .map_err(|e| anyhow::anyhow!("join error: {e}"))?
         .map_err(ApiError::from)?;
     Ok(Json(serde_json::json!({ "oid": oid })))
+}
+
+async fn repo_commit_get(Query(q): Query<DiffQuery>) -> Result<Json<CommitInfo>, ApiError> {
+    let path = PathBuf::from(q.path);
+    commit_info(&path, &q.oid).map(Json).map_err(ApiError::from)
 }
 
 /// Live filesystem-event stream for a single repo. Client opens a WebSocket
@@ -504,7 +515,7 @@ pub fn router(source: WebSource, auth: AuthState) -> Router {
         .route("/repo/events", get(repo_events))
         .route("/repo/stage", post(repo_stage))
         .route("/repo/unstage", post(repo_unstage))
-        .route("/repo/commit", post(repo_commit))
+        .route("/repo/commit", get(repo_commit_get).post(repo_commit))
         .route_layer(middleware::from_fn_with_state(auth.clone(), require_auth));
 
     let api = open.merge(protected).with_state(auth);

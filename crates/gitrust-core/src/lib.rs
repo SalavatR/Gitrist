@@ -763,13 +763,31 @@ fn parse_blame_porcelain(text: &str, path: String) -> anyhow::Result<BlameView> 
     Ok(BlameView { path, lines })
 }
 
+/// Look up a single commit by oid. Same `CommitInfo` shape that
+/// `log_commits` produces, but resolved directly rather than walking
+/// the ancestor graph — useful for permalinks like `?oid=abc123`.
+pub fn commit_info(path: &Path, oid: &str) -> anyhow::Result<CommitInfo> {
+    let repo = gix::open(path)?;
+    let oid = gix::ObjectId::from_hex(oid.as_bytes())
+        .map_err(|e| anyhow::anyhow!("invalid oid `{oid}`: {e}"))?;
+    build_commit_info(&repo, oid)
+}
+
 /// Create a commit with the currently-staged index. Returns the new
-/// HEAD oid.
-pub fn commit(repo: &Path, message: &str) -> anyhow::Result<String> {
+/// HEAD oid. `author` is the optional `--author=<Name <email>>`
+/// override; pass `None` to use the repo's gitconfig identity. The
+/// commit body, if any, is just newlines inside `message` (git
+/// treats the first line as the subject).
+pub fn commit(repo: &Path, message: &str, author: Option<&str>) -> anyhow::Result<String> {
     if message.trim().is_empty() {
         anyhow::bail!("commit message must not be empty");
     }
-    run_git(repo, &["commit", "-q", "-m", message])?;
+    let mut args: Vec<String> = vec!["commit".into(), "-q".into(), "-m".into(), message.into()];
+    if let Some(a) = author.filter(|s| !s.trim().is_empty()) {
+        args.push(format!("--author={a}"));
+    }
+    let args_ref: Vec<&str> = args.iter().map(String::as_str).collect();
+    run_git(repo, &args_ref)?;
     let out = run_git(repo, &["rev-parse", "HEAD"])?;
     let oid = String::from_utf8_lossy(&out.stdout).trim().to_string();
     Ok(oid)
