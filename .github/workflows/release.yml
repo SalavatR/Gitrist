@@ -1,0 +1,115 @@
+name: Release
+
+# Push a tag `vX.Y.Z` to trigger a release build of the gitrust binary
+# for macOS (Apple Silicon + Intel) and Windows, attached to the
+# corresponding GitHub Release. Manual `workflow_dispatch` builds the
+# same matrix but only uploads workflow artifacts (no release).
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  WBG_VERSION: '0.2.121'
+
+jobs:
+  build:
+    name: build (${{ matrix.target }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            archive_ext: tar.gz
+          - os: macos-13
+            target: x86_64-apple-darwin
+            archive_ext: tar.gz
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            archive_ext: zip
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown,${{ matrix.target }}
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: release-${{ matrix.target }}
+
+      - name: Cache wasm-bindgen-cli
+        id: wbg-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/wasm-bindgen
+            ~/.cargo/bin/wasm-bindgen.exe
+          key: wasm-bindgen-${{ env.WBG_VERSION }}-${{ runner.os }}
+
+      - name: Install wasm-bindgen-cli
+        if: steps.wbg-cache.outputs.cache-hit != 'true'
+        run: cargo install wasm-bindgen-cli --version ${{ env.WBG_VERSION }} --locked
+
+      - name: Build WASM bundle
+        shell: bash
+        run: |
+          cargo build -p gitrust-web --target wasm32-unknown-unknown --release
+          mkdir -p crates/gitrust-web/dist
+          wasm-bindgen --target web --no-typescript \
+            --out-dir crates/gitrust-web/dist --out-name gitrust_web \
+            target/wasm32-unknown-unknown/release/gitrust-web.wasm
+          cp crates/gitrust-web/index.html crates/gitrust-web/dist/index.html
+
+      - name: Build release binary (--features desktop)
+        run: cargo build -p gitrust --release --features desktop --target ${{ matrix.target }}
+
+      - name: Package
+        id: pkg
+        shell: bash
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          # workflow_dispatch fires without a tag — fall back to the SHA.
+          if [ "${GITHUB_REF_TYPE}" != "tag" ]; then
+            version="${GITHUB_SHA::8}"
+          fi
+          name="gitrust-${version}-${{ matrix.target }}"
+          mkdir -p "$name"
+
+          bin_src="target/${{ matrix.target }}/release/gitrust"
+          bin_dst="$name/gitrust"
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            bin_src="${bin_src}.exe"
+            bin_dst="${bin_dst}.exe"
+          fi
+          cp "$bin_src" "$bin_dst"
+          for extra in README.md LICENSE-MIT LICENSE-APACHE; do
+            [ -f "$extra" ] && cp "$extra" "$name/"
+          done
+
+          if [ "${{ matrix.archive_ext }}" = "zip" ]; then
+            7z a "${name}.zip" "$name" >/dev/null
+            echo "artifact=${name}.zip" >> "$GITHUB_OUTPUT"
+          else
+            tar czf "${name}.tar.gz" "$name"
+            echo "artifact=${name}.tar.gz" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: gitrust-${{ matrix.target }}
+          path: ${{ steps.pkg.outputs.artifact }}
+
+      - name: Attach to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ steps.pkg.outputs.artifact }}
+          generate_release_notes: true

@@ -124,8 +124,15 @@ within each section.
       webkit2gtk-4.1 + libsoup-3.0.
 - [ ] Native menu bar items (File → Open Repo, View → Reload, etc.).
 - [ ] System keyboard shortcuts (Cmd-W to close on macOS, etc.).
-- [ ] Pre-built release binaries via cargo-dist or GitHub Releases
-      automation, pinned to specific webkit2gtk-4.1 ABI on Linux.
+- [x] Pre-built release binaries via a dedicated GitHub Actions
+      release workflow. Push `vX.Y.Z` and the matrix builds
+      `gitrust --features desktop` for `aarch64-apple-darwin`,
+      `x86_64-apple-darwin`, and `x86_64-pc-windows-msvc`, packages
+      each with README + LICENSE files, and attaches the archive to
+      the GitHub Release. `workflow_dispatch` runs the same matrix
+      but only as workflow artifacts. A Linux binary is still
+      pending — needs the webkit2gtk-4.1 ABI pin to be useful
+      across distros.
 
 ## Infrastructure
 
