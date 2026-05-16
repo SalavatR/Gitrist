@@ -25,7 +25,10 @@ async fn worktree_change_emits_frame() {
 
     let url = reqwest::Url::parse_with_params(
         &format!("ws://{}/api/repo/events", server.addr),
-        &[("path", r.path().to_str().unwrap())],
+        &[
+            ("path", r.path().to_str().unwrap()),
+            ("token", "test-token"),
+        ],
     )
     .expect("build ws url");
 

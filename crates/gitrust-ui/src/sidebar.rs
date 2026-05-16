@@ -306,7 +306,6 @@ pub(crate) fn render_status(
     mut selected_file: Signal<Option<String>>,
     mut selected_blob: Signal<Option<BlobSelection>>,
     current_repo: Signal<String>,
-    auth_token: Signal<Option<String>>,
 ) -> Element {
     match state {
         Some(Ok(entries)) if entries.is_empty() => {
@@ -346,7 +345,7 @@ pub(crate) fn render_status(
                                         title: "Stage this file",
                                         onclick: move |evt| {
                                             evt.stop_propagation();
-                                            stage_one(path_for_stage.clone(), current_repo, auth_token);
+                                            stage_one(path_for_stage.clone(), current_repo);
                                         },
                                         "+"
                                     }
@@ -387,7 +386,6 @@ pub(crate) fn render_staged(
     state: &Option<Result<Vec<StatusEntry>, String>>,
     mut res: Resource<Result<Vec<StatusEntry>, String>>,
     current_repo: Signal<String>,
-    auth_token: Signal<Option<String>>,
 ) -> Element {
     match state {
         Some(Ok(entries)) if entries.is_empty() => {
@@ -411,7 +409,7 @@ pub(crate) fn render_staged(
                                         title: "Unstage this file",
                                         onclick: move |evt| {
                                             evt.stop_propagation();
-                                            unstage_one(p.clone(), current_repo, auth_token);
+                                            unstage_one(p.clone(), current_repo);
                                         },
                                         "−"
                                     }
@@ -435,19 +433,17 @@ pub(crate) fn render_staged(
     }
 }
 
-fn stage_one(file: String, current_repo: Signal<String>, auth_token: Signal<Option<String>>) {
+fn stage_one(file: String, current_repo: Signal<String>) {
     let path = current_repo.read().clone();
-    let token = auth_token.read().clone().unwrap_or_default();
     spawn(async move {
-        let _ = crate::fetch::post_stage(&path, &[file], &token).await;
+        let _ = crate::fetch::post_stage(&path, &[file]).await;
     });
 }
 
-fn unstage_one(file: String, current_repo: Signal<String>, auth_token: Signal<Option<String>>) {
+fn unstage_one(file: String, current_repo: Signal<String>) {
     let path = current_repo.read().clone();
-    let token = auth_token.read().clone().unwrap_or_default();
     spawn(async move {
-        let _ = crate::fetch::post_unstage(&path, &[file], &token).await;
+        let _ = crate::fetch::post_unstage(&path, &[file]).await;
     });
 }
 

@@ -15,8 +15,8 @@ mod time_fmt;
 mod ws;
 
 use fetch::{
-    fetch_auth_token, fetch_blob, fetch_branches, fetch_diff, fetch_diff_working, fetch_log,
-    fetch_remotes, fetch_staged, fetch_status, fetch_summary, fetch_tags, fetch_tree,
+    fetch_blob, fetch_branches, fetch_diff, fetch_diff_working, fetch_log, fetch_remotes,
+    fetch_staged, fetch_status, fetch_summary, fetch_tags, fetch_tree,
 };
 use main_panel::{render_commit_form, render_detail, render_log, render_summary_card};
 use sidebar::{
@@ -25,14 +25,69 @@ use sidebar::{
     render_tree, render_tree_count,
 };
 use state::{
-    BlobSelection, LOG_LIMIT, REFS_POLL_INTERVAL_MS, STATUS_POLL_INTERVAL_MS, ThemeMode,
-    apply_theme, initial_repo, initial_side_by_side, initial_theme, persist_repo,
-    persist_side_by_side, recent_repos, record_recent_repo,
+    AUTH_TOKEN, BlobSelection, LOG_LIMIT, REFS_POLL_INTERVAL_MS, STATUS_POLL_INTERVAL_MS,
+    ThemeMode, apply_theme, clear_auth_token, initial_repo, initial_side_by_side, initial_theme,
+    persist_auth_token, persist_repo, persist_side_by_side, recent_repos, record_recent_repo,
 };
 use time_fmt::sleep_ms;
 
+/// Top-level component. Splits between the auth gate (when no token
+/// is loaded) and the real `AppContent`. The gate hides itself once
+/// `AUTH_TOKEN` becomes `Some` — at which point `AppContent` mounts
+/// fresh, every `use_resource` boots with the token already in place,
+/// and the WS handshake includes it as a query parameter.
 #[component]
 pub fn App() -> Element {
+    let signed_in = AUTH_TOKEN.read().is_some();
+    if signed_in {
+        rsx! { AppContent {} }
+    } else {
+        rsx! { AuthGate {} }
+    }
+}
+
+#[component]
+fn AuthGate() -> Element {
+    let mut value = use_signal(String::new);
+    rsx! {
+        style { {include_str!("../style.css")} }
+        div { class: "auth-gate",
+            div { class: "auth-card",
+                div { class: "auth-brand",
+                    span { class: "logo-mark", "g" }
+                    span { class: "logo-name", "gitrust" }
+                }
+                p { class: "muted",
+                    "Paste the access token printed in the terminal:"
+                }
+                form {
+                    class: "auth-form",
+                    onsubmit: move |e| {
+                        e.prevent_default();
+                        let t = value.read().trim().to_string();
+                        if !t.is_empty() {
+                            persist_auth_token(&t);
+                            *AUTH_TOKEN.write() = Some(t);
+                        }
+                    },
+                    input {
+                        r#type: "password",
+                        placeholder: "64 hex chars",
+                        value: "{value}",
+                        autofocus: true,
+                        spellcheck: "false",
+                        autocomplete: "off",
+                        oninput: move |e| value.set(e.value()),
+                    }
+                    button { r#type: "submit", "Sign in" }
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn AppContent() -> Element {
     let initial = initial_repo();
     let mut current_repo = use_signal(|| initial.clone());
     let mut draft_repo = use_signal(|| initial.clone());
@@ -42,17 +97,8 @@ pub fn App() -> Element {
     let mut side_by_side = use_signal(initial_side_by_side);
     let mut recent = use_signal(recent_repos);
     let mut theme = use_signal(initial_theme);
-    let mut auth_token = use_signal(|| None::<String>);
     let commit_msg = use_signal(String::new);
     let commit_err = use_signal(|| None::<String>);
-
-    use_future(move || async move {
-        if let Ok(t) = fetch_auth_token().await {
-            auth_token.set(Some(t));
-        }
-        // Silent failure: writes will surface a 401 if the token never
-        // landed. Reads keep working either way.
-    });
 
     use_effect(move || {
         let path = current_repo.read().clone();
@@ -247,6 +293,15 @@ pub fn App() -> Element {
                     },
                     {theme.read().label()}
                 }
+                button {
+                    class: "sign-out",
+                    title: "Forget the access token; back to the sign-in screen",
+                    onclick: move |_| {
+                        clear_auth_token();
+                        *AUTH_TOKEN.write() = None;
+                    },
+                    "Sign out"
+                }
             }
 
             div { class: "split",
@@ -281,7 +336,6 @@ pub fn App() -> Element {
                             &staged.read_unchecked(),
                             staged,
                             current_repo,
-                            auth_token,
                         )}
                     }
                     section { class: "side-block",
@@ -296,7 +350,6 @@ pub fn App() -> Element {
                             selected_file,
                             selected_blob,
                             current_repo,
-                            auth_token,
                         )}
                     }
                     section { class: "side-block",
@@ -323,7 +376,7 @@ pub fn App() -> Element {
                             .and_then(|r| r.as_ref().ok())
                             .map(|v| v.len())
                             .unwrap_or(0);
-                        render_commit_form(commit_msg, commit_err, count, current_repo, auth_token)
+                        render_commit_form(commit_msg, commit_err, count, current_repo)
                     }
 
                     section { class: "main-block",

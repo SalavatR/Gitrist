@@ -83,40 +83,28 @@ pub(crate) async fn fetch_staged(path: &str) -> Result<Vec<StatusEntry>, String>
 }
 
 #[cfg(target_arch = "wasm32")]
-pub(crate) async fn fetch_auth_token() -> Result<String, String> {
-    let v: serde_json::Value = fetch_json("/api/auth/token").await?;
-    v.get("token")
-        .and_then(|s| s.as_str())
-        .map(|s| s.to_string())
-        .ok_or_else(|| "auth/token response missing `token` field".to_string())
-}
-
-#[cfg(target_arch = "wasm32")]
-pub(crate) async fn post_stage(path: &str, files: &[String], token: &str) -> Result<(), String> {
+pub(crate) async fn post_stage(path: &str, files: &[String]) -> Result<(), String> {
     post_empty(
         "/api/repo/stage",
         serde_json::json!({ "path": path, "files": files }),
-        token,
     )
     .await
 }
 
 #[cfg(target_arch = "wasm32")]
-pub(crate) async fn post_unstage(path: &str, files: &[String], token: &str) -> Result<(), String> {
+pub(crate) async fn post_unstage(path: &str, files: &[String]) -> Result<(), String> {
     post_empty(
         "/api/repo/unstage",
         serde_json::json!({ "path": path, "files": files }),
-        token,
     )
     .await
 }
 
 #[cfg(target_arch = "wasm32")]
-pub(crate) async fn post_commit(path: &str, message: &str, token: &str) -> Result<String, String> {
+pub(crate) async fn post_commit(path: &str, message: &str) -> Result<String, String> {
     let v: serde_json::Value = post_with_response(
         "/api/repo/commit",
         serde_json::json!({ "path": path, "message": message }),
-        token,
     )
     .await?;
     v.get("oid")
@@ -125,9 +113,20 @@ pub(crate) async fn post_commit(path: &str, message: &str, token: &str) -> Resul
         .ok_or_else(|| "commit response missing `oid` field".to_string())
 }
 
+/// Read the active token without subscribing the current Dioxus scope —
+/// fetch tasks run inside use_resource closures whose dependencies are
+/// already the things they care about (current_repo, oid, …).
+#[cfg(target_arch = "wasm32")]
+fn current_token() -> String {
+    use dioxus::prelude::ReadableExt;
+    crate::state::AUTH_TOKEN.peek().clone().unwrap_or_default()
+}
+
 #[cfg(target_arch = "wasm32")]
 async fn fetch_json<T: serde::de::DeserializeOwned>(url: &str) -> Result<T, String> {
+    let token = current_token();
     let resp = gloo_net::http::Request::get(url)
+        .header("Authorization", &format!("Bearer {token}"))
         .send()
         .await
         .map_err(|e| e.to_string())?;
@@ -138,7 +137,8 @@ async fn fetch_json<T: serde::de::DeserializeOwned>(url: &str) -> Result<T, Stri
 }
 
 #[cfg(target_arch = "wasm32")]
-async fn post_empty(url: &str, body: serde_json::Value, token: &str) -> Result<(), String> {
+async fn post_empty(url: &str, body: serde_json::Value) -> Result<(), String> {
+    let token = current_token();
     let resp = gloo_net::http::Request::post(url)
         .header("Authorization", &format!("Bearer {token}"))
         .json(&body)
@@ -156,8 +156,8 @@ async fn post_empty(url: &str, body: serde_json::Value, token: &str) -> Result<(
 async fn post_with_response<T: serde::de::DeserializeOwned>(
     url: &str,
     body: serde_json::Value,
-    token: &str,
 ) -> Result<T, String> {
+    let token = current_token();
     let resp = gloo_net::http::Request::post(url)
         .header("Authorization", &format!("Bearer {token}"))
         .json(&body)
@@ -243,29 +243,16 @@ pub(crate) async fn fetch_staged(_path: &str) -> Result<Vec<StatusEntry>, String
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-pub(crate) async fn fetch_auth_token() -> Result<String, String> {
-    Err("native build: fetching not implemented".into())
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-pub(crate) async fn post_stage(_path: &str, _files: &[String], _token: &str) -> Result<(), String> {
+pub(crate) async fn post_stage(_path: &str, _files: &[String]) -> Result<(), String> {
     Err("native build: writes not implemented".into())
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-pub(crate) async fn post_unstage(
-    _path: &str,
-    _files: &[String],
-    _token: &str,
-) -> Result<(), String> {
+pub(crate) async fn post_unstage(_path: &str, _files: &[String]) -> Result<(), String> {
     Err("native build: writes not implemented".into())
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-pub(crate) async fn post_commit(
-    _path: &str,
-    _message: &str,
-    _token: &str,
-) -> Result<String, String> {
+pub(crate) async fn post_commit(_path: &str, _message: &str) -> Result<String, String> {
     Err("native build: writes not implemented".into())
 }

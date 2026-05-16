@@ -15,7 +15,6 @@ pub(crate) fn render_commit_form(
     mut error: Signal<Option<String>>,
     staged_count: usize,
     current_repo: Signal<String>,
-    auth_token: Signal<Option<String>>,
 ) -> Element {
     let msg_text = message.read().clone();
     let can_submit = !msg_text.trim().is_empty() && staged_count > 0;
@@ -44,10 +43,9 @@ pub(crate) fn render_commit_form(
                     disabled: !can_submit,
                     onclick: move |_| {
                         let path = current_repo.read().clone();
-                        let token = auth_token.read().clone().unwrap_or_default();
                         let body = message.read().clone();
                         spawn(async move {
-                            match crate::fetch::post_commit(&path, &body, &token).await {
+                            match crate::fetch::post_commit(&path, &body).await {
                                 Ok(_) => {
                                     message.set(String::new());
                                     error.set(None);

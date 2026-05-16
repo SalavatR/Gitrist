@@ -431,23 +431,29 @@ fn generate_token() -> String {
     out
 }
 
-async fn auth_token(State(auth): State<AuthState>) -> Json<serde_json::Value> {
-    Json(serde_json::json!({ "token": auth.token }))
-}
-
-/// Middleware for write endpoints — requires `Authorization: Bearer <token>`
-/// matching the loaded auth token.
+/// Middleware that gates every endpoint except `/api/health`. Accepts the
+/// token from either:
+/// - `Authorization: Bearer <token>` — what reqwest and the in-browser
+///   `fetch` API use for normal HTTP.
+/// - `?token=<token>` query string — the browser WebSocket API can't
+///   send custom headers, so the UI tacks the token onto the
+///   `/api/repo/events` upgrade URL instead.
 async fn require_auth(
     State(auth): State<AuthState>,
     req: axum::extract::Request,
     next: middleware::Next,
 ) -> Result<axum::response::Response, StatusCode> {
-    let bearer = req
+    let from_header = req
         .headers()
         .get(axum::http::header::AUTHORIZATION)
         .and_then(|h| h.to_str().ok())
         .and_then(|s| s.strip_prefix("Bearer "));
-    match bearer {
+    let from_query = req
+        .uri()
+        .query()
+        .and_then(|q| q.split('&').find_map(|p| p.strip_prefix("token=")));
+    let provided = from_header.or(from_query);
+    match provided {
         Some(t) if t == auth.token => Ok(next.run(req).await),
         _ => Err(StatusCode::UNAUTHORIZED),
     }
@@ -466,17 +472,12 @@ pub enum WebSource {
 }
 
 pub fn router(source: WebSource, auth: AuthState) -> Router {
-    // Write routes share one middleware that rejects requests without
-    // a matching `Authorization: Bearer <token>`. Reads stay open.
-    let writes = Router::new()
-        .route("/repo/stage", post(repo_stage))
-        .route("/repo/unstage", post(repo_unstage))
-        .route("/repo/commit", post(repo_commit))
-        .route_layer(middleware::from_fn_with_state(auth.clone(), require_auth));
+    // /api/health is the only open endpoint — gives users (and the UI's
+    // auth gate) a way to verify the server is reachable before the
+    // bearer token is in place. Everything else is gated.
+    let open = Router::new().route("/health", get(health));
 
-    let api = Router::new()
-        .route("/health", get(health))
-        .route("/auth/token", get(auth_token))
+    let protected = Router::new()
         .route("/repo/summary", get(repo_summary))
         .route("/repo/log", get(repo_log))
         .route("/repo/status", get(repo_status))
@@ -489,8 +490,12 @@ pub fn router(source: WebSource, auth: AuthState) -> Router {
         .route("/repo/diff", get(repo_diff))
         .route("/repo/diff/working", get(repo_diff_working))
         .route("/repo/events", get(repo_events))
-        .merge(writes)
-        .with_state(auth);
+        .route("/repo/stage", post(repo_stage))
+        .route("/repo/unstage", post(repo_unstage))
+        .route("/repo/commit", post(repo_commit))
+        .route_layer(middleware::from_fn_with_state(auth.clone(), require_auth));
+
+    let api = open.merge(protected).with_state(auth);
 
     let mut app = Router::new().nest("/api", api);
     match source {
@@ -550,12 +555,22 @@ fn guess_content_type(path: &str) -> &'static str {
 pub async fn serve(addr: SocketAddr, source: WebSource) -> anyhow::Result<()> {
     let auth = AuthState::from_default_path()?;
     let listener = tokio::net::TcpListener::bind(addr).await?;
-    tracing::info!(
-        "gitrust-server listening on http://{}",
-        listener.local_addr()?
-    );
+    let bound = listener.local_addr()?;
+    tracing::info!("gitrust-server listening on http://{bound}");
+    print_auth_banner(bound, &auth.token);
     axum::serve(listener, router(source, auth)).await?;
     Ok(())
+}
+
+fn print_auth_banner(addr: SocketAddr, token: &str) {
+    // Use stderr so the banner survives output redirection of
+    // anything that's piping stdout (`gitrust serve | something`).
+    eprintln!();
+    eprintln!("  gitrust ready at http://{addr}");
+    eprintln!("  paste the access token below into the browser:");
+    eprintln!();
+    eprintln!("    {token}");
+    eprintln!();
 }
 
 #[cfg(test)]

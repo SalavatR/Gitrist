@@ -71,10 +71,19 @@ pub(crate) async fn run_event_stream(path: String, live: LiveResources) {
     if path.is_empty() {
         return;
     }
+    use dioxus::prelude::ReadableExt;
+    let token = crate::state::AUTH_TOKEN.peek().clone().unwrap_or_default();
+    if token.is_empty() {
+        // No token yet — bail; the App will restart this future once the
+        // user signs in (the auth gate triggers a re-render of the
+        // gated subtree).
+        return;
+    }
     let url = format!(
-        "{}/api/repo/events?path={}",
+        "{}/api/repo/events?path={}&token={}",
         ws_origin(),
         urlencoding::encode(&path),
+        urlencoding::encode(&token),
     );
 
     let mut backoff_ms: u32 = 500;

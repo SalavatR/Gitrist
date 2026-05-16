@@ -1,6 +1,47 @@
 //! Client-side state: types passed between components and localStorage
 //! persistence for repo path and view-mode preferences.
 
+use dioxus::prelude::GlobalSignal;
+
+/// The access token shared by every authenticated request. The server
+/// prints it at startup; the user pastes it into the auth gate. Stored
+/// in localStorage so signing in survives a refresh.
+pub(crate) static AUTH_TOKEN: GlobalSignal<Option<String>> = GlobalSignal::new(initial_auth_token);
+
+#[cfg(target_arch = "wasm32")]
+const TOKEN_STORAGE_KEY: &str = "gitrust.token";
+
+#[cfg(target_arch = "wasm32")]
+fn initial_auth_token() -> Option<String> {
+    use gloo_storage::Storage;
+    gloo_storage::LocalStorage::get::<String>(TOKEN_STORAGE_KEY)
+        .ok()
+        .filter(|s| !s.is_empty())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn initial_auth_token() -> Option<String> {
+    None
+}
+
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn persist_auth_token(token: &str) {
+    use gloo_storage::Storage;
+    let _ = gloo_storage::LocalStorage::set(TOKEN_STORAGE_KEY, token);
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn persist_auth_token(_token: &str) {}
+
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn clear_auth_token() {
+    use gloo_storage::Storage;
+    gloo_storage::LocalStorage::delete(TOKEN_STORAGE_KEY);
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn clear_auth_token() {}
+
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub(crate) enum ThemeMode {
     Auto,

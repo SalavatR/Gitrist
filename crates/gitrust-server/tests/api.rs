@@ -9,14 +9,24 @@ use common::{ServerHandle, TestRepo, spawn_server};
 use serde_json::Value;
 
 async fn get_json(server: &ServerHandle, path: &str, query: &[(&str, &str)]) -> (u16, Value) {
-    let resp = reqwest::Client::new()
+    get_json_with_auth(server, path, query, Some("test-token")).await
+}
+
+async fn get_json_with_auth(
+    server: &ServerHandle,
+    path: &str,
+    query: &[(&str, &str)],
+    auth: Option<&str>,
+) -> (u16, Value) {
+    let mut req = reqwest::Client::new()
         .get(format!("{}{path}", server.base()))
-        .query(query)
-        .send()
-        .await
-        .expect("send");
+        .query(query);
+    if let Some(token) = auth {
+        req = req.header("Authorization", format!("Bearer {token}"));
+    }
+    let resp = req.send().await.expect("send");
     let status = resp.status().as_u16();
-    let body = resp.json::<Value>().await.expect("json");
+    let body = resp.json::<Value>().await.unwrap_or(Value::Null);
     (status, body)
 }
 
@@ -39,11 +49,43 @@ async fn health_returns_ok_status_and_version() {
 }
 
 #[tokio::test]
-async fn auth_token_endpoint_returns_the_active_token() {
+async fn health_is_open_no_auth_required() {
     let server = spawn_server().await;
-    let (status, body) = get_json(&server, "/api/auth/token", &[]).await;
+    let (status, body) = get_json_with_auth(&server, "/api/health", &[], None).await;
     assert_eq!(status, 200);
-    assert_eq!(body["token"], "test-token");
+    assert_eq!(body["status"], "ok");
+}
+
+#[tokio::test]
+async fn protected_read_without_auth_returns_401() {
+    let (server, r) = setup_with_initial_commit().await;
+    let (status, _) = get_json_with_auth(
+        &server,
+        "/api/repo/summary",
+        &[("path", r.path().to_str().unwrap())],
+        None,
+    )
+    .await;
+    assert_eq!(status, 401);
+}
+
+#[tokio::test]
+async fn protected_read_with_query_token_works() {
+    let (server, r) = setup_with_initial_commit().await;
+    // ?token=… is the WebSocket-friendly auth channel; verify it works
+    // for plain HTTP too so the path stays single-purpose.
+    let (status, body) = get_json_with_auth(
+        &server,
+        "/api/repo/summary",
+        &[
+            ("path", r.path().to_str().unwrap()),
+            ("token", "test-token"),
+        ],
+        None,
+    )
+    .await;
+    assert_eq!(status, 200);
+    assert_eq!(body["head_ref"], "master");
 }
 
 #[tokio::test]

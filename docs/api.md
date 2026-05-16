@@ -385,28 +385,38 @@ curl 'http://127.0.0.1:3737/api/repo/diff/working?path=/home/me/myrepo&file=src/
 Same hunk shape (context lines, line-number gutter, binary
 detection) as the commit diff.
 
-## Write endpoints — `Authorization: Bearer <token>` required
+## Auth
+
+Every endpoint except `/api/health` requires a token. It's generated
+on first launch and written to `$XDG_CONFIG_HOME/gitrust/token`
+(mode `0600` on unix); subsequent launches reuse the same value.
+The server prints the token to **stderr** during boot:
+
+```
+  gitrust ready at http://127.0.0.1:3737
+  paste the access token below into the browser:
+
+    0f1c…7a
+```
+
+Two channels accept the token:
+
+- `Authorization: Bearer <token>` — what the in-browser UI uses for
+  all `fetch` requests and what plain HTTP clients (curl, reqwest)
+  should send.
+- `?token=<token>` query string — the browser WebSocket API can't
+  set custom headers, so `/api/repo/events` accepts the token in
+  the URL. Plain HTTP also accepts it via query for symmetry.
+
+A missing or wrong token returns `401 Unauthorized`. There is no
+`/api/auth/token` endpoint — the user enters the token manually
+into the UI's sign-in form.
+
+## Write endpoints
 
 `POST /api/repo/stage`, `/api/repo/unstage`, and `/api/repo/commit`
-gate on the token written to `$XDG_CONFIG_HOME/gitrust/token` at
-first launch. Reads stay open (the server is `localhost`-only by
-default). The UI fetches the token via `GET /api/auth/token` (also
-open) and rides it on every write.
-
-### `GET /api/auth/token`
-
-```sh
-curl http://127.0.0.1:3737/api/auth/token
-```
-
-```json
-{ "token": "0f1c…7a" }
-```
-
-64 hex chars (32 random bytes). Reading it requires no auth —
-anyone who can reach the loopback API can already read the token
-file at the path above. The endpoint exists so the in-browser UI
-can bootstrap without prompting.
+share the same auth gate as everything else above (it just makes
+no sense to talk about writes without it).
 
 ### `POST /api/repo/stage`
 
