@@ -147,16 +147,15 @@ async fn run_event_stream(
     let repo = std::fs::canonicalize(&repo).unwrap_or(repo);
 
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<notify::Event>();
-    let mut watcher = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
-        match res {
+    let mut watcher =
+        notify::recommended_watcher(move |res: notify::Result<notify::Event>| match res {
             Ok(event) => {
                 let _ = tx.send(event);
             }
             Err(e) => {
                 tracing::warn!("events: notify error: {e}");
             }
-        }
-    })?;
+        })?;
     add_watches(&mut watcher, &repo)?;
 
     let (mut sink, mut stream) = socket.split();
