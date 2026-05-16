@@ -138,6 +138,102 @@ async fn diff_returns_per_file_hunks() {
     assert_eq!(files[0]["kind"], "modified");
 }
 
+async fn post_json(
+    server: &ServerHandle,
+    path: &str,
+    auth: Option<&str>,
+    body: Value,
+) -> (u16, Value) {
+    let mut req = reqwest::Client::new().post(format!("{}{path}", server.base()));
+    if let Some(token) = auth {
+        req = req.header("Authorization", format!("Bearer {token}"));
+    }
+    let resp = req.json(&body).send().await.expect("send");
+    let status = resp.status().as_u16();
+    // Some success cases return no body (204) — be tolerant.
+    let body = resp.json::<Value>().await.unwrap_or(Value::Null);
+    (status, body)
+}
+
+#[tokio::test]
+async fn stage_without_auth_returns_401() {
+    let (server, r) = setup_with_initial_commit().await;
+    r.write("new.txt", "x\n");
+    let (status, _) = post_json(
+        &server,
+        "/api/repo/stage",
+        None,
+        serde_json::json!({
+            "path": r.path().to_str().unwrap(),
+            "files": ["new.txt"],
+        }),
+    )
+    .await;
+    assert_eq!(status, 401);
+}
+
+#[tokio::test]
+async fn stage_with_auth_places_file_in_index() {
+    let (server, r) = setup_with_initial_commit().await;
+    r.write("new.txt", "x\n");
+    let (status, _) = post_json(
+        &server,
+        "/api/repo/stage",
+        Some("test-token"),
+        serde_json::json!({
+            "path": r.path().to_str().unwrap(),
+            "files": ["new.txt"],
+        }),
+    )
+    .await;
+    assert_eq!(status, 204);
+    let cached = r.git(&["ls-files", "--cached"]);
+    assert!(cached.lines().any(|l| l == "new.txt"));
+}
+
+#[tokio::test]
+async fn unstage_with_auth_drops_index_entry() {
+    let (server, r) = setup_with_initial_commit().await;
+    r.write("new.txt", "x\n");
+    r.git(&["add", "new.txt"]);
+    let (status, _) = post_json(
+        &server,
+        "/api/repo/unstage",
+        Some("test-token"),
+        serde_json::json!({
+            "path": r.path().to_str().unwrap(),
+            "files": ["new.txt"],
+        }),
+    )
+    .await;
+    assert_eq!(status, 204);
+    let cached = r.git(&["ls-files", "--cached"]);
+    assert!(!cached.lines().any(|l| l == "new.txt"));
+}
+
+#[tokio::test]
+async fn commit_with_auth_creates_new_commit() {
+    let (server, r) = setup_with_initial_commit().await;
+    r.write("a.txt", "v2\n");
+    r.git(&["add", "a.txt"]);
+    let (status, body) = post_json(
+        &server,
+        "/api/repo/commit",
+        Some("test-token"),
+        serde_json::json!({
+            "path": r.path().to_str().unwrap(),
+            "message": "second",
+        }),
+    )
+    .await;
+    assert_eq!(status, 200);
+    let oid = body["oid"].as_str().expect("oid string");
+    assert_eq!(oid.len(), 40);
+    let log = r.git(&["log", "--oneline"]);
+    assert_eq!(log.lines().count(), 2);
+    assert!(log.lines().next().unwrap().contains("second"));
+}
+
 #[tokio::test]
 async fn nonexistent_repo_returns_400_with_error_envelope() {
     let server = spawn_server().await;

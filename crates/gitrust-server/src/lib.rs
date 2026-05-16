@@ -7,7 +7,7 @@ use axum::{
     http::StatusCode,
     middleware,
     response::IntoResponse,
-    routing::get,
+    routing::{get, post},
 };
 use futures::StreamExt;
 use serde::{Deserialize, Serialize};
@@ -16,9 +16,9 @@ use tower_http::trace::TraceLayer;
 
 use gitrust_core::{
     BlobView, BranchInfo, CommitDiff, CommitInfo, FileDiff, RemoteBranchInfo, RepoSummary,
-    StatusEntry, TagInfo, TreeEntry, diff_commit, diff_working, list_branches,
-    list_remote_branches, list_status, list_tags, list_tree, log_commits, show_blob,
-    summarize_repo,
+    StatusEntry, TagInfo, TreeEntry, commit as core_commit, diff_commit, diff_working,
+    list_branches, list_remote_branches, list_status, list_tags, list_tree, log_commits, show_blob,
+    stage_files as core_stage_files, summarize_repo, unstage_files as core_unstage,
 };
 
 #[derive(Serialize)]
@@ -125,6 +125,48 @@ async fn repo_diff_working(Query(q): Query<DiffWorkingQuery>) -> Result<Json<Fil
     diff_working(&path, &q.file)
         .map(Json)
         .map_err(ApiError::from)
+}
+
+#[derive(Deserialize)]
+struct StageBody {
+    path: String,
+    files: Vec<String>,
+}
+
+async fn repo_stage(Json(body): Json<StageBody>) -> Result<StatusCode, ApiError> {
+    let StageBody { path, files } = body;
+    let repo = PathBuf::from(path);
+    tokio::task::spawn_blocking(move || core_stage_files(&repo, &files))
+        .await
+        .map_err(|e| anyhow::anyhow!("join error: {e}"))?
+        .map_err(ApiError::from)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn repo_unstage(Json(body): Json<StageBody>) -> Result<StatusCode, ApiError> {
+    let StageBody { path, files } = body;
+    let repo = PathBuf::from(path);
+    tokio::task::spawn_blocking(move || core_unstage(&repo, &files))
+        .await
+        .map_err(|e| anyhow::anyhow!("join error: {e}"))?
+        .map_err(ApiError::from)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Deserialize)]
+struct CommitBody {
+    path: String,
+    message: String,
+}
+
+async fn repo_commit(Json(body): Json<CommitBody>) -> Result<Json<serde_json::Value>, ApiError> {
+    let CommitBody { path, message } = body;
+    let repo = PathBuf::from(path);
+    let oid = tokio::task::spawn_blocking(move || core_commit(&repo, &message))
+        .await
+        .map_err(|e| anyhow::anyhow!("join error: {e}"))?
+        .map_err(ApiError::from)?;
+    Ok(Json(serde_json::json!({ "oid": oid })))
 }
 
 /// Live filesystem-event stream for a single repo. Client opens a WebSocket
@@ -388,9 +430,7 @@ async fn auth_token(State(auth): State<AuthState>) -> Json<serde_json::Value> {
 }
 
 /// Middleware for write endpoints — requires `Authorization: Bearer <token>`
-/// matching the loaded auth token. Currently has no consumers; will gate
-/// the upcoming stage / unstage / commit POST routes.
-#[allow(dead_code)]
+/// matching the loaded auth token.
 async fn require_auth(
     State(auth): State<AuthState>,
     req: axum::extract::Request,
@@ -420,6 +460,14 @@ pub enum WebSource {
 }
 
 pub fn router(source: WebSource, auth: AuthState) -> Router {
+    // Write routes share one middleware that rejects requests without
+    // a matching `Authorization: Bearer <token>`. Reads stay open.
+    let writes = Router::new()
+        .route("/repo/stage", post(repo_stage))
+        .route("/repo/unstage", post(repo_unstage))
+        .route("/repo/commit", post(repo_commit))
+        .route_layer(middleware::from_fn_with_state(auth.clone(), require_auth));
+
     let api = Router::new()
         .route("/health", get(health))
         .route("/auth/token", get(auth_token))
@@ -434,6 +482,7 @@ pub fn router(source: WebSource, auth: AuthState) -> Router {
         .route("/repo/diff", get(repo_diff))
         .route("/repo/diff/working", get(repo_diff_working))
         .route("/repo/events", get(repo_events))
+        .merge(writes)
         .with_state(auth);
 
     let mut app = Router::new().nest("/api", api);

@@ -567,3 +567,72 @@ fn token_text(input: &InternedInput<&[u8]>, token: IDToken) -> String {
     let trimmed = bytes.strip_suffix(b"\n").unwrap_or(bytes);
     String::from_utf8_lossy(trimmed).into_owned()
 }
+
+// ─── Write operations ───────────────────────────────────────────────────
+//
+// These shell out to the system `git` CLI rather than driving gix's
+// index API directly. Rationale: gix's write-side surface for index
+// manipulation isn't fully stable yet, and staging UX has to feel
+// indistinguishable from `git add` / `git reset` for users. Once gix
+// settles its index/commit APIs, these become a drop-in replacement.
+
+fn run_git(repo: &Path, args: &[&str]) -> anyhow::Result<std::process::Output> {
+    let out = std::process::Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args(args)
+        .output()
+        .map_err(|e| anyhow::anyhow!("spawning `git {}`: {e}", args.join(" ")))?;
+    if !out.status.success() {
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        let trimmed = stderr.trim();
+        anyhow::bail!(
+            "git {} failed (status {}): {}",
+            args.join(" "),
+            out.status,
+            if trimmed.is_empty() {
+                "(no stderr)"
+            } else {
+                trimmed
+            }
+        );
+    }
+    Ok(out)
+}
+
+/// `git add -- <files>` — move worktree blobs into the index.
+pub fn stage_files(repo: &Path, files: &[String]) -> anyhow::Result<()> {
+    if files.is_empty() {
+        return Ok(());
+    }
+    let mut args = vec!["add", "--"];
+    for f in files {
+        args.push(f.as_str());
+    }
+    run_git(repo, &args).map(|_| ())
+}
+
+/// `git reset HEAD -- <files>` — drop the index entries back to whatever
+/// HEAD has for these paths (or remove them entirely for new files).
+pub fn unstage_files(repo: &Path, files: &[String]) -> anyhow::Result<()> {
+    if files.is_empty() {
+        return Ok(());
+    }
+    let mut args = vec!["reset", "-q", "HEAD", "--"];
+    for f in files {
+        args.push(f.as_str());
+    }
+    run_git(repo, &args).map(|_| ())
+}
+
+/// Create a commit with the currently-staged index. Returns the new
+/// HEAD oid.
+pub fn commit(repo: &Path, message: &str) -> anyhow::Result<String> {
+    if message.trim().is_empty() {
+        anyhow::bail!("commit message must not be empty");
+    }
+    run_git(repo, &["commit", "-q", "-m", message])?;
+    let out = run_git(repo, &["rev-parse", "HEAD"])?;
+    let oid = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    Ok(oid)
+}

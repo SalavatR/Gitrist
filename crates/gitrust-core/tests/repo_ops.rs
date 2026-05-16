@@ -197,3 +197,78 @@ fn diff_working_shows_modified_file() {
     assert!(!d.is_binary);
     assert!(!d.hunks.is_empty());
 }
+
+#[test]
+fn stage_moves_untracked_to_index() {
+    let r = TestRepo::new();
+    r.write("seed.txt", "s\n");
+    r.git(&["add", "seed.txt"]);
+    r.git(&["commit", "-q", "-m", "seed"]);
+    r.write("new.txt", "hello\n");
+
+    let pre = gitrust_core::list_status(r.path()).unwrap();
+    assert!(
+        pre.iter()
+            .any(|e| e.path == "new.txt" && e.kind == "untracked")
+    );
+
+    gitrust_core::stage_files(r.path(), &["new.txt".to_string()]).expect("stage");
+
+    let staged = r.git(&["ls-files", "--cached"]);
+    assert!(
+        staged.lines().any(|l| l == "new.txt"),
+        "new.txt should be in the index, got: {staged:?}"
+    );
+}
+
+#[test]
+fn unstage_drops_index_entry_for_added_file() {
+    let r = TestRepo::new();
+    r.write("seed.txt", "s\n");
+    r.git(&["add", "seed.txt"]);
+    r.git(&["commit", "-q", "-m", "seed"]);
+    r.write("new.txt", "hello\n");
+    r.git(&["add", "new.txt"]);
+
+    gitrust_core::unstage_files(r.path(), &["new.txt".to_string()]).expect("unstage");
+
+    let staged = r.git(&["ls-files", "--cached"]);
+    assert!(
+        !staged.lines().any(|l| l == "new.txt"),
+        "new.txt should be out of the index, got: {staged:?}"
+    );
+    // And it's back to untracked in the worktree.
+    let st = gitrust_core::list_status(r.path()).unwrap();
+    assert!(
+        st.iter()
+            .any(|e| e.path == "new.txt" && e.kind == "untracked")
+    );
+}
+
+#[test]
+fn commit_creates_new_commit_with_staged_changes() {
+    let r = TestRepo::new();
+    r.write("seed.txt", "v1\n");
+    r.git(&["add", "seed.txt"]);
+    r.git(&["commit", "-q", "-m", "first"]);
+
+    r.write("seed.txt", "v2\n");
+    gitrust_core::stage_files(r.path(), &["seed.txt".to_string()]).unwrap();
+
+    let oid = gitrust_core::commit(r.path(), "second").expect("commit");
+    assert_eq!(oid.len(), 40);
+
+    let log = gitrust_core::log_commits(r.path(), 10).unwrap();
+    assert_eq!(log.len(), 2);
+    assert_eq!(log[0].summary, "second");
+    assert_eq!(log[0].oid, oid);
+}
+
+#[test]
+fn commit_rejects_empty_message() {
+    let r = TestRepo::new();
+    r.write("seed.txt", "x\n");
+    r.git(&["add", "seed.txt"]);
+    let err = gitrust_core::commit(r.path(), "   ").expect_err("empty message");
+    assert!(err.to_string().contains("empty"));
+}

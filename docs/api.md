@@ -363,6 +363,68 @@ curl 'http://127.0.0.1:3737/api/repo/diff/working?path=/home/me/myrepo&file=src/
 Same hunk shape (context lines, line-number gutter, binary
 detection) as the commit diff.
 
+## Write endpoints — `Authorization: Bearer <token>` required
+
+`POST /api/repo/stage`, `/api/repo/unstage`, and `/api/repo/commit`
+gate on the token written to `$XDG_CONFIG_HOME/gitrust/token` at
+first launch. Reads stay open (the server is `localhost`-only by
+default). The UI fetches the token via `GET /api/auth/token` (also
+open) and rides it on every write.
+
+### `GET /api/auth/token`
+
+```sh
+curl http://127.0.0.1:3737/api/auth/token
+```
+
+```json
+{ "token": "0f1c…7a" }
+```
+
+64 hex chars (32 random bytes). Reading it requires no auth —
+anyone who can reach the loopback API can already read the token
+file at the path above. The endpoint exists so the in-browser UI
+can bootstrap without prompting.
+
+### `POST /api/repo/stage`
+
+```sh
+curl -X POST http://127.0.0.1:3737/api/repo/stage \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"path":"/home/me/myrepo","files":["src/main.rs","README.md"]}'
+```
+
+Returns `204 No Content` on success. Empty `files` is a no-op,
+not an error.
+
+### `POST /api/repo/unstage`
+
+Same shape as `/stage`. Returns `204 No Content`. Reverts the
+index entries for `files` to whatever HEAD has (or drops them
+entirely for paths HEAD doesn't carry yet).
+
+### `POST /api/repo/commit`
+
+```sh
+curl -X POST http://127.0.0.1:3737/api/repo/commit \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"path":"/home/me/myrepo","message":"feat: ship the thing"}'
+```
+
+```json
+{ "oid": "85ea44373cc77f401b5ea4fc665c08e8c026fbe4" }
+```
+
+Whatever's currently in the index becomes the new commit. Empty
+or whitespace-only messages return 400. Author identity comes
+from the repo's gitconfig (`user.name`, `user.email`).
+
+All three endpoints return 401 on a missing or wrong `Authorization`
+header and 400 with the usual `{ "error": "…" }` envelope on a
+git-level failure (no staged changes, dirty index, etc.).
+
 ## `GET /api/repo/events?path=<path>` (WebSocket)
 
 Live filesystem-event stream for one repo. Clients send the standard
