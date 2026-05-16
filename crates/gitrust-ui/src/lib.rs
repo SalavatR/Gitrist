@@ -213,8 +213,27 @@ pub fn App() -> Element {
                         oninput: move |e| draft_repo.set(e.value()),
                     }
                     datalist { id: "recent-repos",
-                        for r in recent.read().iter().cloned() {
-                            option { key: "{r}", value: "{r}" }
+                        {
+                            // Always seed with the current repo so the
+                            // dropdown is useful on first-mount before
+                            // the persist effect has had a chance to
+                            // write to localStorage and bump `recent`.
+                            let cur = current_repo.read().clone();
+                            let stored: Vec<String> = recent.read().iter().cloned().collect();
+                            let mut out: Vec<String> = Vec::with_capacity(stored.len() + 1);
+                            if !cur.is_empty() {
+                                out.push(cur.clone());
+                            }
+                            for p in stored {
+                                if !out.contains(&p) {
+                                    out.push(p);
+                                }
+                            }
+                            rsx! {
+                                for r in out {
+                                    option { key: "{r}", value: "{r}" }
+                                }
+                            }
                         }
                     }
                     button { r#type: "submit", "Load" }

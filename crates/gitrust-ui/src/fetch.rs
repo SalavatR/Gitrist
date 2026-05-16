@@ -132,7 +132,7 @@ async fn fetch_json<T: serde::de::DeserializeOwned>(url: &str) -> Result<T, Stri
         .await
         .map_err(|e| e.to_string())?;
     if !resp.ok() {
-        return Err(format!("HTTP {}", resp.status()));
+        return Err(extract_error(resp).await);
     }
     resp.json::<T>().await.map_err(|e| e.to_string())
 }
@@ -147,7 +147,7 @@ async fn post_empty(url: &str, body: serde_json::Value, token: &str) -> Result<(
         .await
         .map_err(|e| e.to_string())?;
     if !resp.ok() {
-        return Err(format!("HTTP {}", resp.status()));
+        return Err(extract_error(resp).await);
     }
     Ok(())
 }
@@ -166,9 +166,25 @@ async fn post_with_response<T: serde::de::DeserializeOwned>(
         .await
         .map_err(|e| e.to_string())?;
     if !resp.ok() {
-        return Err(format!("HTTP {}", resp.status()));
+        return Err(extract_error(resp).await);
     }
     resp.json::<T>().await.map_err(|e| e.to_string())
+}
+
+/// Pull the `error` field out of the server's `{ "error": "..." }`
+/// envelope. Falls back to `HTTP <status>` when the body is missing
+/// or not JSON — both keep the message readable in the UI.
+#[cfg(target_arch = "wasm32")]
+async fn extract_error(resp: gloo_net::http::Response) -> String {
+    let status = resp.status();
+    match resp.json::<serde_json::Value>().await {
+        Ok(v) => v
+            .get("error")
+            .and_then(|x| x.as_str())
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| format!("HTTP {status}")),
+        Err(_) => format!("HTTP {status}"),
+    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
