@@ -563,14 +563,15 @@ pub async fn serve(addr: SocketAddr, source: WebSource) -> anyhow::Result<()> {
 }
 
 fn print_auth_banner(addr: SocketAddr, token: &str) {
-    // Use stderr so the banner survives output redirection of
-    // anything that's piping stdout (`gitrust serve | something`).
-    eprintln!();
-    eprintln!("  gitrust ready at http://{addr}");
-    eprintln!("  paste the access token below into the browser:");
-    eprintln!();
-    eprintln!("    {token}");
-    eprintln!();
+    // stdout, line-buffered: stays right after cargo's "Running …"
+    // line so the token is the first thing the user sees in the
+    // terminal when launching via `make run` or `cargo run`.
+    println!();
+    println!("  gitrust ready at http://{addr}");
+    println!("  paste the access token below into the browser:");
+    println!();
+    println!("    {token}");
+    println!();
 }
 
 #[cfg(test)]
