@@ -184,9 +184,21 @@ async fn post_with_response<T: serde::de::DeserializeOwned>(
 /// Pull the `error` field out of the server's `{ "error": "..." }`
 /// envelope. Falls back to `HTTP <status>` when the body is missing
 /// or not JSON — both keep the message readable in the UI.
+///
+/// Side effect: on `401 Unauthorized` we wipe the stored token and
+/// flip the GlobalSignal back to `None`. App's top-level gate
+/// subscribes to that signal, so the in-progress error briefly
+/// flashes and then AppContent unmounts and the sign-in screen
+/// takes over. Every in-flight request gets cancelled when its
+/// owning `use_resource` is dropped.
 #[cfg(target_arch = "wasm32")]
 async fn extract_error(resp: gloo_net::http::Response) -> String {
     let status = resp.status();
+    if status == 401 {
+        crate::state::clear_auth_token();
+        *crate::state::AUTH_TOKEN.write() = None;
+        return "session expired — sign in again".to_string();
+    }
     match resp.json::<serde_json::Value>().await {
         Ok(v) => v
             .get("error")
