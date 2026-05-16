@@ -179,6 +179,26 @@ async fn status_reports_modified_file() {
 }
 
 #[tokio::test]
+async fn blame_returns_per_line_attribution() {
+    let (server, r) = setup_with_initial_commit().await;
+    let (status, body) = get_json(
+        &server,
+        "/api/repo/blame",
+        &[("path", r.path().to_str().unwrap()), ("file", "a.txt")],
+    )
+    .await;
+    assert_eq!(status, 200);
+    let lines = body["lines"].as_array().expect("lines");
+    assert_eq!(lines.len(), 1);
+    let l = &lines[0];
+    assert_eq!(l["line_number"], 1);
+    assert_eq!(l["text"], "hello");
+    assert_eq!(l["author_name"], "Test");
+    assert!(l["oid"].as_str().is_some_and(|s| s.len() == 40));
+    assert!(l["short_oid"].as_str().is_some_and(|s| s.len() == 8));
+}
+
+#[tokio::test]
 async fn diff_returns_per_file_hunks() {
     let (server, r) = setup_with_initial_commit().await;
     r.write("a.txt", "changed\n");

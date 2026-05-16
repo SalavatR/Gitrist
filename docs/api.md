@@ -347,6 +347,47 @@ curl 'http://127.0.0.1:3737/api/repo/diff?path=/home/me/myrepo&oid=85ea44…'
 Tree-level entries (directories) are filtered from the response;
 only file changes appear.
 
+## `GET /api/repo/blame?path=<path>&file=<rel-path>`
+
+Line-by-line attribution of `file` at HEAD, parsed from `git blame
+--porcelain`. Each line carries the commit it last touched plus
+enough metadata to render an annotation column (short oid, author
+name, summary, committer time).
+
+```sh
+curl 'http://127.0.0.1:3737/api/repo/blame?path=/home/me/myrepo&file=src/main.rs' \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+```json
+{
+  "path": "src/main.rs",
+  "lines": [
+    {
+      "line_number": 1,
+      "text": "use std::path::Path;",
+      "oid": "85ea44373cc77f401b5ea4fc665c08e8c026fbe4",
+      "short_oid": "85ea4437",
+      "author_name": "Salavat",
+      "time_unix": 1778270159,
+      "summary": "feat: bootstrap workspace"
+    }
+  ]
+}
+```
+
+- `line_number` — 1-indexed.
+- `oid` — the commit that last modified this line. For lines that
+  are present in the worktree but not yet committed (e.g. unstaged
+  modifications), this is the all-zero sentinel git uses.
+- `short_oid` — first 8 hex chars; for click-to-commit affordances.
+- `summary` / `author_name` / `time_unix` — copied from the commit
+  header; same shape as `/api/repo/log` entries.
+
+Renames and copies are followed by default (this is just what
+`git blame` does); the response always carries the new line numbers
+in the current file.
+
 ## `GET /api/repo/diff/working?path=<path>&file=<rel-path>`
 
 Diff of one working-tree file against its index version. Returns the

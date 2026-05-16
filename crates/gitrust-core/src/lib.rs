@@ -6,8 +6,8 @@ use gix::bstr::ByteSlice;
 use gix::diff::blob::{Algorithm, InternedInput, Token as IDToken};
 
 pub use gitrust_types::{
-    BlobLine, BlobView, BranchInfo, CommitDiff, CommitInfo, DiffHunk, DiffLine, FileDiff,
-    RemoteBranchInfo, RepoSummary, StatusEntry, TagInfo, Token, TreeEntry,
+    BlameLine, BlameView, BlobLine, BlobView, BranchInfo, CommitDiff, CommitInfo, DiffHunk,
+    DiffLine, FileDiff, RemoteBranchInfo, RepoSummary, StatusEntry, TagInfo, Token, TreeEntry,
 };
 
 fn build_commit_info(repo: &gix::Repository, oid: gix::ObjectId) -> anyhow::Result<CommitInfo> {
@@ -681,6 +681,86 @@ pub fn unstage_files(repo: &Path, files: &[String]) -> anyhow::Result<()> {
         args.push(f.as_str());
     }
     run_git(repo, &args).map(|_| ())
+}
+
+/// Line-by-line attribution of `file` at HEAD via `git blame
+/// --porcelain`. Uncommitted lines (e.g. unstaged modifications) come
+/// back with the all-zero oid that git uses as a sentinel; the UI
+/// renders them with a "not committed yet" treatment.
+pub fn blame_file(repo: &Path, file: &str) -> anyhow::Result<BlameView> {
+    let out = run_git(repo, &["blame", "--porcelain", "--", file])?;
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    parse_blame_porcelain(&stdout, file.to_string())
+}
+
+fn parse_blame_porcelain(text: &str, path: String) -> anyhow::Result<BlameView> {
+    use std::collections::HashMap;
+
+    #[derive(Default, Clone)]
+    struct CommitMeta {
+        author: String,
+        time: i64,
+        summary: String,
+    }
+
+    let mut commits: HashMap<String, CommitMeta> = HashMap::new();
+    let mut lines: Vec<BlameLine> = Vec::new();
+
+    let mut iter = text.lines().peekable();
+    while let Some(header) = iter.next() {
+        // <oid> <orig-line> <final-line> [<num-in-group>]
+        let mut parts = header.split_whitespace();
+        let oid = parts
+            .next()
+            .ok_or_else(|| anyhow::anyhow!("blame: missing oid in header `{header}`"))?
+            .to_string();
+        let _orig = parts.next();
+        let final_line: u32 = parts
+            .next()
+            .ok_or_else(|| anyhow::anyhow!("blame: missing final-line in header `{header}`"))?
+            .parse()?;
+
+        let mut meta = CommitMeta::default();
+        let mut saw_author = false;
+        let mut text_line = String::new();
+        while let Some(next) = iter.peek() {
+            if let Some(content) = next.strip_prefix('\t') {
+                text_line = content.to_string();
+                iter.next();
+                break;
+            }
+            let line = iter.next().unwrap();
+            if let Some(val) = line.strip_prefix("author ") {
+                meta.author = val.to_string();
+                saw_author = true;
+            } else if let Some(val) = line.strip_prefix("author-time ") {
+                meta.time = val.parse().unwrap_or(0);
+            } else if let Some(val) = line.strip_prefix("summary ") {
+                meta.summary = val.to_string();
+            }
+            // Drop the rest (author-mail, author-tz, committer-*, previous, filename, boundary).
+        }
+
+        // First mention of a commit carries all header fields; later mentions
+        // only repeat the oid + tab-content line, so cache and look up.
+        if saw_author {
+            commits.insert(oid.clone(), meta.clone());
+        } else if let Some(cached) = commits.get(&oid) {
+            meta = cached.clone();
+        }
+
+        lines.push(BlameLine {
+            line_number: final_line,
+            text: text_line,
+            short_oid: oid.chars().take(8).collect(),
+            oid,
+            author_name: meta.author,
+            time_unix: meta.time,
+            summary: meta.summary,
+        });
+    }
+
+    Ok(BlameView { path, lines })
 }
 
 /// Create a commit with the currently-staged index. Returns the new

@@ -15,10 +15,10 @@ use tower_http::services::ServeDir;
 use tower_http::trace::TraceLayer;
 
 use gitrust_core::{
-    BlobView, BranchInfo, CommitDiff, CommitInfo, FileDiff, RemoteBranchInfo, RepoSummary,
-    StatusEntry, TagInfo, TreeEntry, commit as core_commit, diff_commit, diff_working,
-    list_branches, list_remote_branches, list_staged, list_status, list_tags, list_tree,
-    log_commits, show_blob, stage_files as core_stage_files, summarize_repo,
+    BlameView, BlobView, BranchInfo, CommitDiff, CommitInfo, FileDiff, RemoteBranchInfo,
+    RepoSummary, StatusEntry, TagInfo, TreeEntry, blame_file, commit as core_commit, diff_commit,
+    diff_working, list_branches, list_remote_branches, list_staged, list_status, list_tags,
+    list_tree, log_commits, show_blob, stage_files as core_stage_files, summarize_repo,
     unstage_files as core_unstage,
 };
 
@@ -131,6 +131,17 @@ async fn repo_diff_working(Query(q): Query<DiffWorkingQuery>) -> Result<Json<Fil
     diff_working(&path, &q.file)
         .map(Json)
         .map_err(ApiError::from)
+}
+
+#[derive(Deserialize)]
+struct BlameQuery {
+    path: String,
+    file: String,
+}
+
+async fn repo_blame(Query(q): Query<BlameQuery>) -> Result<Json<BlameView>, ApiError> {
+    let path = PathBuf::from(q.path);
+    blame_file(&path, &q.file).map(Json).map_err(ApiError::from)
 }
 
 #[derive(Deserialize)]
@@ -489,6 +500,7 @@ pub fn router(source: WebSource, auth: AuthState) -> Router {
         .route("/repo/blob", get(repo_blob))
         .route("/repo/diff", get(repo_diff))
         .route("/repo/diff/working", get(repo_diff_working))
+        .route("/repo/blame", get(repo_blame))
         .route("/repo/events", get(repo_events))
         .route("/repo/stage", post(repo_stage))
         .route("/repo/unstage", post(repo_unstage))

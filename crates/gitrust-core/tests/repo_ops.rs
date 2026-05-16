@@ -299,6 +299,38 @@ fn list_staged_handles_unborn_head() {
 }
 
 #[test]
+fn blame_attributes_lines_to_their_authoring_commits() {
+    let r = TestRepo::new();
+    // Two commits, each adding a distinct line — blame should attribute
+    // each line to the commit that introduced it.
+    r.write("notes.txt", "first\n");
+    r.git(&["add", "notes.txt"]);
+    r.git(&["commit", "-q", "-m", "introduce first"]);
+    let oid_one = r.git(&["rev-parse", "HEAD"]).trim().to_string();
+
+    r.write("notes.txt", "first\nsecond\n");
+    r.git(&["add", "notes.txt"]);
+    r.git(&["commit", "-q", "-m", "add second"]);
+    let oid_two = r.git(&["rev-parse", "HEAD"]).trim().to_string();
+
+    let view = gitrust_core::blame_file(r.path(), "notes.txt").expect("blame_file");
+    assert_eq!(view.path, "notes.txt");
+    assert_eq!(view.lines.len(), 2);
+
+    assert_eq!(view.lines[0].line_number, 1);
+    assert_eq!(view.lines[0].text, "first");
+    assert_eq!(view.lines[0].oid, oid_one);
+    assert_eq!(view.lines[0].author_name, "Test");
+    assert_eq!(view.lines[0].summary, "introduce first");
+
+    assert_eq!(view.lines[1].line_number, 2);
+    assert_eq!(view.lines[1].text, "second");
+    assert_eq!(view.lines[1].oid, oid_two);
+    assert_eq!(view.lines[1].summary, "add second");
+    assert!(view.lines[1].time_unix > 0);
+}
+
+#[test]
 fn commit_rejects_empty_message() {
     let r = TestRepo::new();
     r.write("seed.txt", "x\n");

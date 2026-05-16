@@ -125,3 +125,20 @@ pub struct BlobView {
     pub is_binary: bool,
     pub lines: Vec<BlobLine>,
 }
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BlameLine {
+    pub line_number: u32,
+    pub text: String,
+    pub oid: String,
+    pub short_oid: String,
+    pub author_name: String,
+    pub time_unix: i64,
+    pub summary: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BlameView {
+    pub path: String,
+    pub lines: Vec<BlameLine>,
+}
