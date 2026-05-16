@@ -301,6 +301,20 @@ fn AppContent() -> Element {
                             }
                         }
                     }
+                    button {
+                        r#type: "button",
+                        class: "browse-btn",
+                        title: "Open the native folder picker — needed on macOS to grant access to a repo under a TCC-protected directory like ~/Documents.",
+                        onclick: move |_| {
+                            spawn(async move {
+                                if let Ok(Some(picked)) = fetch::post_pick_folder().await {
+                                    draft_repo.set(picked.clone());
+                                    current_repo.set(picked);
+                                }
+                            });
+                        },
+                        "Browse…"
+                    }
                     button { r#type: "submit", "Load" }
                 }
                 button {

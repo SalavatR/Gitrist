@@ -580,6 +580,26 @@ exists.
 commit oid (detached HEAD). Refuses when local changes would be
 overwritten.
 
+### `POST /api/repo/pick-folder` (desktop only)
+
+Pops the OS-native folder picker (`NSOpenPanel` on macOS, the
+GTK portal on Linux, `IFileDialog` on Windows) and returns the
+chosen path. Body is ignored — accepts `null` for symmetry with
+the rest of the POST surface.
+
+```json
+{ "path": "/home/me/projects/x" }
+```
+
+`path` is `null` when the user cancels. Only mounted when the
+server was built with `--features desktop` (it's the
+\`gitrust app\` flavour); plain `gitrust serve` returns 404.
+
+The dialog is the official way around macOS TCC: when the user
+picks a folder, the OS grants the in-process app
+read-and-write access for the rest of the session without any
+entitlement-plist plumbing on our side.
+
 ## `GET /api/repo/events?path=<path>` (WebSocket)
 
 Live filesystem-event stream for one repo. Clients send the standard

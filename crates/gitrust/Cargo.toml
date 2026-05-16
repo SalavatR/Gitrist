@@ -29,4 +29,10 @@ default = []
 # muda (cross-platform menu bar). Pulls in system deps (webkit2gtk +
 # libsoup on Linux, WebView2 on Windows, WKWebView on macOS — built-in).
 # Off by default so headless / dev builds work without those libs.
-desktop = ["dep:tao", "dep:wry", "dep:muda", "dep:gtk"]
+desktop = [
+    "dep:tao",
+    "dep:wry",
+    "dep:muda",
+    "dep:gtk",
+    "gitrust-server/desktop",
+]

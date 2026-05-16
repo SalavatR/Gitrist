@@ -285,6 +285,25 @@ async fn repo_discard(Json(body): Json<StageBody>) -> Result<StatusCode, ApiErro
     Ok(StatusCode::NO_CONTENT)
 }
 
+/// Open the OS-native folder picker (NSOpenPanel on macOS, the GTK
+/// portal/file-chooser on Linux, IFileDialog on Windows) and return
+/// the chosen path. This is the official way around macOS TCC — when
+/// the user picks a folder through `rfd`, macOS grants the app
+/// access to that folder for the rest of the session without any
+/// entitlement plumbing.
+///
+/// Only built when the `desktop` feature is enabled — the headless
+/// `gitrust serve` flavour has no UI to put behind the dialog.
+#[cfg(feature = "desktop")]
+async fn pick_folder() -> Result<Json<serde_json::Value>, ApiError> {
+    let handle = rfd::AsyncFileDialog::new()
+        .set_title("Open a git repository")
+        .pick_folder()
+        .await;
+    let path = handle.map(|h| h.path().display().to_string());
+    Ok(Json(serde_json::json!({ "path": path })))
+}
+
 /// Live filesystem-event stream for a single repo. Client opens a WebSocket
 /// and gets debounced, deduplicated event kinds (`head_changed`,
 /// `refs_changed`, `index_changed`, `worktree_changed`) as JSON text frames.
@@ -624,8 +643,13 @@ pub fn router(source: WebSource, auth: AuthState) -> Router {
         .route("/repo/branches/create", post(repo_branch_create))
         .route("/repo/branches/delete", post(repo_branch_delete))
         .route("/repo/branches/rename", post(repo_branch_rename))
-        .route("/repo/checkout", post(repo_checkout))
-        .route_layer(middleware::from_fn_with_state(auth.clone(), require_auth));
+        .route("/repo/checkout", post(repo_checkout));
+
+    #[cfg(feature = "desktop")]
+    let protected = protected.route("/repo/pick-folder", post(pick_folder));
+
+    let protected =
+        protected.route_layer(middleware::from_fn_with_state(auth.clone(), require_auth));
 
     let api = open
         .merge(protected)

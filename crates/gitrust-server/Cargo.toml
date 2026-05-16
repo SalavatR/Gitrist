@@ -18,6 +18,13 @@ include_dir = { workspace = true }
 notify = { workspace = true }
 futures = { workspace = true }
 getrandom = { workspace = true }
+rfd = { version = "0.15", optional = true }
+
+[features]
+# Pulls in the native file picker (`rfd`) and exposes the
+# `/api/repo/pick-folder` endpoint that the desktop window uses to
+# bypass macOS TCC by going through NSOpenPanel.
+desktop = ["dep:rfd"]
 
 [dev-dependencies]
 tempfile = "3"

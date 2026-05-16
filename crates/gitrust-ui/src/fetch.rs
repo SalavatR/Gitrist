@@ -155,6 +155,19 @@ pub(crate) async fn post_branch_rename(path: &str, old: &str, new: &str) -> Resu
     .await
 }
 
+/// Pops the native folder picker on the server side (via `rfd`) and
+/// returns the chosen path. `Ok(None)` means the user cancelled. Only
+/// works against a server built with `--features desktop`; vanilla
+/// `gitrust serve` returns 404 here.
+#[cfg(target_arch = "wasm32")]
+pub(crate) async fn post_pick_folder() -> Result<Option<String>, String> {
+    let v: serde_json::Value =
+        post_with_response("/api/repo/pick-folder", serde_json::Value::Null).await?;
+    Ok(v.get("path")
+        .and_then(|s| s.as_str())
+        .map(|s| s.to_string()))
+}
+
 #[cfg(target_arch = "wasm32")]
 pub(crate) async fn post_commit(
     path: &str,
@@ -367,5 +380,10 @@ pub(crate) async fn post_branch_delete(
 
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) async fn post_branch_rename(_path: &str, _old: &str, _new: &str) -> Result<(), String> {
+    Err("native build: writes not implemented".into())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) async fn post_pick_folder() -> Result<Option<String>, String> {
     Err("native build: writes not implemented".into())
 }
