@@ -456,6 +456,45 @@ details.tree-folder summary.tree-folder-row::-webkit-details-marker { display: n
   padding: 0 0.85rem;
   overflow: visible;
 }
+.blob-line.match {
+  background: var(--accent-bg);
+}
+.blob-search {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin: 0.4rem 0 0.2rem;
+}
+.blob-search input[type="search"] {
+  flex: 0 1 20rem;
+  padding: 0.3rem 0.6rem;
+  font-size: 0.78rem;
+  font-family: var(--mono);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+}
+.blob-search input[type="search"]:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.history-search {
+  flex: 0 1 22rem;
+  padding: 0.3rem 0.6rem;
+  font-size: 0.78rem;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+}
+.history-search:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.small {
+  font-size: 0.74rem;
+}
 .blame-col {
   display: grid;
   grid-template-columns: 5em 1fr 3.5em;

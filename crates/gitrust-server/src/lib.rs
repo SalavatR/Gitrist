@@ -42,6 +42,10 @@ struct LogQuery {
     path: String,
     #[serde(default = "default_limit")]
     limit: usize,
+    /// Optional substring filter on commit message / author / oid prefix.
+    /// Case-insensitive. When absent or empty the log is unfiltered.
+    #[serde(default)]
+    q: Option<String>,
 }
 
 fn default_limit() -> usize {
@@ -62,7 +66,7 @@ async fn repo_summary(Query(q): Query<PathQuery>) -> Result<Json<RepoSummary>, A
 
 async fn repo_log(Query(q): Query<LogQuery>) -> Result<Json<Vec<CommitInfo>>, ApiError> {
     let path = PathBuf::from(q.path);
-    log_commits(&path, q.limit.min(500))
+    log_commits(&path, q.limit.min(500), q.q.as_deref())
         .map(Json)
         .map_err(ApiError::from)
 }

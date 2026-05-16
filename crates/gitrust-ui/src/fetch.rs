@@ -22,8 +22,18 @@ pub(crate) async fn fetch_summary(path: &str) -> Result<RepoSummary, String> {
 }
 
 #[cfg(target_arch = "wasm32")]
-pub(crate) async fn fetch_log(path: &str, limit: usize) -> Result<Vec<CommitInfo>, String> {
-    fetch_json(&format!("/api/repo/log?path={}&limit={limit}", q(path))).await
+pub(crate) async fn fetch_log(
+    path: &str,
+    limit: usize,
+    query: &str,
+) -> Result<Vec<CommitInfo>, String> {
+    let base = format!("/api/repo/log?path={}&limit={limit}", q(path));
+    let url = if query.trim().is_empty() {
+        base
+    } else {
+        format!("{base}&q={}", q(query.trim()))
+    };
+    fetch_json(&url).await
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -319,7 +329,11 @@ pub(crate) async fn fetch_summary(_path: &str) -> Result<RepoSummary, String> {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-pub(crate) async fn fetch_log(_path: &str, _limit: usize) -> Result<Vec<CommitInfo>, String> {
+pub(crate) async fn fetch_log(
+    _path: &str,
+    _limit: usize,
+    _query: &str,
+) -> Result<Vec<CommitInfo>, String> {
     Err("native build: fetching not implemented".into())
 }
 

@@ -205,13 +205,14 @@ pub(crate) fn render_detail(
     blob_state: &Option<Result<Option<BlobView>, String>>,
     blob_res: Resource<Result<Option<BlobView>, String>>,
     blame_state: &Option<Result<Option<BlameView>, String>>,
+    blob_query: Signal<String>,
     selected_oid: Signal<Option<String>>,
     selected_file: Signal<Option<String>>,
     selected_blob: Signal<Option<BlobSelection>>,
     side_by_side: bool,
 ) -> Element {
     if selected_blob.read().is_some() {
-        return render_blob_viewer(blob_state, blob_res, blame_state);
+        return render_blob_viewer(blob_state, blob_res, blame_state, blob_query);
     }
     if let Some(file) = selected_file.read().clone() {
         return render_working_detail(working_state, working_res, &file, side_by_side);
@@ -226,6 +227,7 @@ fn render_blob_viewer(
     state: &Option<Result<Option<BlobView>, String>>,
     mut res: Resource<Result<Option<BlobView>, String>>,
     blame_state: &Option<Result<Option<BlameView>, String>>,
+    mut blob_query: Signal<String>,
 ) -> Element {
     match state {
         Some(Ok(Some(b))) => {
@@ -250,12 +252,39 @@ fn render_blob_viewer(
                 })
                 .unwrap_or_default();
 
+            let query_raw = blob_query.read().clone();
+            let query_lc = query_raw.trim().to_lowercase();
+            let match_count = if query_lc.is_empty() {
+                0
+            } else {
+                lines
+                    .iter()
+                    .filter(|l| l.text.to_lowercase().contains(&query_lc))
+                    .count()
+            };
+
             rsx! {
                 div { class: "diff-header",
                     div { class: "title", code { class: "full-oid", "{path}" } }
                     div { class: "meta",
                         "{line_count} lines · {size} bytes · "
                         code { "{oid}" }
+                    }
+                }
+                if !is_binary {
+                    div { class: "blob-search",
+                        input {
+                            r#type: "search",
+                            placeholder: "Find in file",
+                            value: "{query_raw}",
+                            spellcheck: "false",
+                            autocapitalize: "off",
+                            autocomplete: "off",
+                            oninput: move |e| blob_query.set(e.value()),
+                        }
+                        if !query_lc.is_empty() {
+                            span { class: "muted small", "{match_count} match(es)" }
+                        }
                     }
                 }
                 if is_binary {
@@ -265,7 +294,9 @@ fn render_blob_viewer(
                         for l in lines {
                             {
                                 let blame = blame_by_line.get(&l.number).cloned();
-                                render_blob_line(l, blame)
+                                let is_match = !query_lc.is_empty()
+                                    && l.text.to_lowercase().contains(&query_lc);
+                                render_blob_line(l, blame, is_match)
                             }
                         }
                     }
@@ -285,12 +316,17 @@ fn render_blob_viewer(
     }
 }
 
-fn render_blob_line(l: BlobLine, blame: Option<BlameLine>) -> Element {
+fn render_blob_line(l: BlobLine, blame: Option<BlameLine>, is_match: bool) -> Element {
     let n = l.number;
     let tokens = l.tokens.clone();
     let plain = l.text.clone();
+    let class = if is_match {
+        "blob-line match"
+    } else {
+        "blob-line"
+    };
     rsx! {
-        div { class: "blob-line",
+        div { class: "{class}",
             {render_blame_cell(blame)}
             span { class: "ln", "{n}" }
             span { class: "txt", {render_line_content(&tokens, &plain)} }

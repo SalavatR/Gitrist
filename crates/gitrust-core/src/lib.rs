@@ -46,14 +46,44 @@ pub fn summarize_repo(path: &Path) -> anyhow::Result<RepoSummary> {
     })
 }
 
-pub fn log_commits(path: &Path, limit: usize) -> anyhow::Result<Vec<CommitInfo>> {
+/// Walk HEAD's ancestors and return up to `limit` matching commits.
+/// When `query` is `Some(non-empty)`, a commit only counts if the
+/// lowercased query appears in its summary, body, author name, or as
+/// a prefix of its oid. Walking is capped at `MAX_LOG_WALK` so a rare
+/// query doesn't iterate the entire history.
+pub fn log_commits(
+    path: &Path,
+    limit: usize,
+    query: Option<&str>,
+) -> anyhow::Result<Vec<CommitInfo>> {
+    const MAX_LOG_WALK: usize = 5_000;
+
+    let needle = query
+        .map(|s| s.trim().to_lowercase())
+        .filter(|s| !s.is_empty());
+
     let repo = gix::open(path)?;
     let head_id = repo.head_id()?;
     let walk = head_id.ancestors().all()?;
     let mut commits = Vec::with_capacity(limit.min(64));
-    for item in walk.take(limit) {
+    for item in walk.take(MAX_LOG_WALK) {
+        if commits.len() >= limit {
+            break;
+        }
         let info = item?;
-        commits.push(build_commit_info(&repo, info.id)?);
+        let entry = build_commit_info(&repo, info.id)?;
+        let keep = match &needle {
+            Some(q) => {
+                entry.summary.to_lowercase().contains(q)
+                    || entry.body.to_lowercase().contains(q)
+                    || entry.author_name.to_lowercase().contains(q)
+                    || entry.oid.starts_with(q)
+            }
+            None => true,
+        };
+        if keep {
+            commits.push(entry);
+        }
     }
     Ok(commits)
 }

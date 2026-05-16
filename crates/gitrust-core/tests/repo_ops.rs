@@ -28,13 +28,38 @@ fn log_returns_commits_newest_first_and_respects_limit() {
         r.git(&["commit", "-q", "-m", &format!("commit-{i}")]);
     }
 
-    let all = gitrust_core::log_commits(r.path(), 10).expect("log");
+    let all = gitrust_core::log_commits(r.path(), 10, None).expect("log");
     assert_eq!(all.len(), 3);
     assert_eq!(all[0].summary, "commit-3");
     assert_eq!(all[2].summary, "commit-1");
 
-    let two = gitrust_core::log_commits(r.path(), 2).expect("log limit");
+    let two = gitrust_core::log_commits(r.path(), 2, None).expect("log limit");
     assert_eq!(two.len(), 2);
+}
+
+#[test]
+fn log_filters_on_query_against_summary_and_author() {
+    let r = TestRepo::new();
+    for (i, msg) in ["feat: bootstrap", "fix: tweak parser", "feat: shiny thing"]
+        .iter()
+        .enumerate()
+    {
+        r.write("a", &i.to_string());
+        r.git(&["add", "a"]);
+        r.git(&["commit", "-q", "-m", msg]);
+    }
+    let only_feats = gitrust_core::log_commits(r.path(), 10, Some("feat")).expect("filtered");
+    assert_eq!(only_feats.len(), 2);
+    assert!(only_feats.iter().all(|c| c.summary.contains("feat")));
+
+    // Case-insensitive substring match.
+    let parser = gitrust_core::log_commits(r.path(), 10, Some("PARSER")).expect("ci filter");
+    assert_eq!(parser.len(), 1);
+    assert!(parser[0].summary.contains("parser"));
+
+    // Empty query falls through to unfiltered.
+    let all = gitrust_core::log_commits(r.path(), 10, Some("   ")).expect("empty q");
+    assert_eq!(all.len(), 3);
 }
 
 #[test]
@@ -258,7 +283,7 @@ fn commit_creates_new_commit_with_staged_changes() {
     let oid = gitrust_core::commit(r.path(), "second", None).expect("commit");
     assert_eq!(oid.len(), 40);
 
-    let log = gitrust_core::log_commits(r.path(), 10).unwrap();
+    let log = gitrust_core::log_commits(r.path(), 10, None).unwrap();
     assert_eq!(log.len(), 2);
     assert_eq!(log[0].summary, "second");
     assert_eq!(log[0].oid, oid);

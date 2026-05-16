@@ -102,6 +102,8 @@ fn AppContent() -> Element {
     let commit_err = use_signal(|| None::<String>);
     let commit_author = use_signal(String::new);
     let new_branch = use_signal(String::new);
+    let mut log_query = use_signal(String::new);
+    let blob_query = use_signal(String::new);
 
     use_effect(move || {
         let path = current_repo.read().clone();
@@ -124,7 +126,8 @@ fn AppContent() -> Element {
     });
     let mut log = use_resource(move || {
         let path = current_repo.read().clone();
-        async move { fetch_log(&path, LOG_LIMIT).await }
+        let q = log_query.read().clone();
+        async move { fetch_log(&path, LOG_LIMIT, &q).await }
     });
     let mut status = use_resource(move || {
         let path = current_repo.read().clone();
@@ -437,7 +440,19 @@ fn AppContent() -> Element {
                     }
 
                     section { class: "main-block",
-                        h2 { "History" }
+                        div { class: "block-toolbar",
+                            h2 { style: "margin: 0;", "History" }
+                            input {
+                                class: "history-search",
+                                r#type: "search",
+                                placeholder: "Filter by subject / author / oid prefix",
+                                value: "{log_query}",
+                                spellcheck: "false",
+                                autocapitalize: "off",
+                                autocomplete: "off",
+                                oninput: move |e| log_query.set(e.value()),
+                            }
+                        }
                         {render_log(
                             &log.read_unchecked(),
                             log,
@@ -473,6 +488,7 @@ fn AppContent() -> Element {
                             &blob_view_stale.read_unchecked(),
                             blob_view,
                             &blame_view_stale.read_unchecked(),
+                            blob_query,
                             selected_oid,
                             selected_file,
                             selected_blob,
