@@ -41,32 +41,17 @@ pub fn App() -> Element {
         persist_side_by_side(sbs);
     });
 
-    let summary = use_resource(move || {
+    let mut summary = use_resource(move || {
         let path = current_repo.read().clone();
         async move { fetch_summary(&path).await }
     });
-    let log = use_resource(move || {
+    let mut log = use_resource(move || {
         let path = current_repo.read().clone();
         async move { fetch_log(&path, LOG_LIMIT).await }
     });
     let mut status = use_resource(move || {
         let path = current_repo.read().clone();
         async move { fetch_status(&path).await }
-    });
-    let mut summary_for_poll = summary;
-    let mut log_for_poll = log;
-    use_future(move || async move {
-        loop {
-            sleep_ms(STATUS_POLL_INTERVAL_MS).await;
-            status.restart();
-        }
-    });
-    use_future(move || async move {
-        loop {
-            sleep_ms(REFS_POLL_INTERVAL_MS).await;
-            summary_for_poll.restart();
-            log_for_poll.restart();
-        }
     });
     let branches = use_resource(move || {
         let path = current_repo.read().clone();
@@ -84,6 +69,40 @@ pub fn App() -> Element {
         let path = current_repo.read().clone();
         async move { fetch_tree(&path).await }
     });
+
+    // Polling stays as a silent fallback — WS push is the primary path.
+    use_future(move || async move {
+        loop {
+            sleep_ms(STATUS_POLL_INTERVAL_MS).await;
+            status.restart();
+        }
+    });
+    use_future(move || async move {
+        loop {
+            sleep_ms(REFS_POLL_INTERVAL_MS).await;
+            summary.restart();
+            log.restart();
+        }
+    });
+
+    // Live WS push: `use_resource` is keyed on `current_repo` so swapping
+    // the repo cancels the previous future and drops the socket cleanly.
+    #[cfg(target_arch = "wasm32")]
+    {
+        let live = LiveResources {
+            summary,
+            log,
+            status,
+            branches,
+            tags,
+            remotes,
+            tree,
+        };
+        let _ws_lifecycle = use_resource(move || {
+            let path = current_repo.read().clone();
+            async move { run_event_stream(path, live).await }
+        });
+    }
     let blob_view = use_resource(move || {
         let path = current_repo.read().clone();
         let sel = selected_blob.read().clone();
@@ -1327,4 +1346,103 @@ async fn fetch_diff(_path: &str, _oid: &str) -> Result<CommitDiff, String> {
 #[cfg(not(target_arch = "wasm32"))]
 async fn fetch_diff_working(_path: &str, _file: &str) -> Result<FileDiff, String> {
     Err("native build: fetching not implemented".into())
+}
+
+#[cfg(target_arch = "wasm32")]
+#[derive(Copy, Clone)]
+struct LiveResources {
+    summary: Resource<Result<RepoSummary, String>>,
+    log: Resource<Result<Vec<CommitInfo>, String>>,
+    status: Resource<Result<Vec<StatusEntry>, String>>,
+    branches: Resource<Result<Vec<BranchInfo>, String>>,
+    tags: Resource<Result<Vec<TagInfo>, String>>,
+    remotes: Resource<Result<Vec<RemoteBranchInfo>, String>>,
+    tree: Resource<Result<Vec<TreeEntry>, String>>,
+}
+
+#[cfg(target_arch = "wasm32")]
+impl LiveResources {
+    fn dispatch(mut self, kind: &str) {
+        match kind {
+            "head_changed" => {
+                self.summary.restart();
+                self.log.restart();
+                self.status.restart();
+                self.branches.restart();
+                self.tags.restart();
+                self.remotes.restart();
+                self.tree.restart();
+            }
+            "refs_changed" => {
+                self.summary.restart();
+                self.log.restart();
+                self.branches.restart();
+                self.tags.restart();
+                self.remotes.restart();
+                self.tree.restart();
+            }
+            "index_changed" | "worktree_changed" => {
+                self.status.restart();
+            }
+            _ => {}
+        }
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+#[derive(serde::Deserialize)]
+struct EventMsg {
+    kind: String,
+}
+
+#[cfg(target_arch = "wasm32")]
+async fn run_event_stream(path: String, live: LiveResources) {
+    use futures::StreamExt;
+    use gloo_net::websocket::{Message, futures::WebSocket};
+
+    if path.is_empty() {
+        return;
+    }
+    let url = format!(
+        "{}/api/repo/events?path={}",
+        ws_origin(),
+        urlencoding::encode(&path),
+    );
+
+    let mut backoff_ms: u32 = 500;
+    loop {
+        let ws = match WebSocket::open(&url) {
+            Ok(w) => w,
+            Err(_) => {
+                sleep_ms(backoff_ms).await;
+                backoff_ms = backoff_ms.saturating_mul(2).min(30_000);
+                continue;
+            }
+        };
+        backoff_ms = 500;
+        let (_write, mut read) = ws.split();
+        while let Some(msg) = read.next().await {
+            match msg {
+                Ok(Message::Text(t)) => {
+                    if let Ok(e) = serde_json::from_str::<EventMsg>(&t) {
+                        live.dispatch(&e.kind);
+                    }
+                }
+                Ok(Message::Bytes(_)) => {}
+                Err(_) => break,
+            }
+        }
+        sleep_ms(backoff_ms).await;
+        backoff_ms = backoff_ms.saturating_mul(2).min(30_000);
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn ws_origin() -> String {
+    let window = gloo_utils::window();
+    let loc = window.location();
+    let proto = loc.protocol().unwrap_or_else(|_| "http:".into());
+    let host = loc.host().unwrap_or_else(|_| "localhost:3737".into());
+    let ws_proto = if proto == "https:" { "wss:" } else { "ws:" };
+    format!("{ws_proto}//{host}")
 }

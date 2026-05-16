@@ -113,8 +113,18 @@ within each section.
       `StatusEntry`, `BranchInfo` (and future shapes) from both core
       and ui into a shared, target-independent crate. Trigger when
       duplication starts hurting.
-- [ ] Push-based refresh: server watches FS via `notify`; UI gets a
-      WebSocket and refetches on change rather than polling.
+- [x] Push-based refresh: server watches FS via `notify` and pushes
+      debounced event kinds (`head_changed`, `refs_changed`,
+      `index_changed`, `worktree_changed`) over `/api/repo/events`
+      WebSocket. UI opens one socket per repo (keyed on
+      `current_repo` through `use_resource`, so swapping the repo
+      drops the previous socket) and dispatches each kind to the
+      affected `use_resource.restart()`s. The watcher walks the
+      worktree manually with a skip-list (`target/`, `node_modules/`,
+      `.direnv/`, `.venv/`, `.git/objects/`, `.git/lfs/`) so it
+      doesn't blow past inotify's `max_user_watches`. Reconnects
+      with exponential backoff (500 ms → 30 s) on disconnect. The
+      previous 2 s/10 s polling stays as a silent fallback.
 - [ ] Structured error envelope: `{ error, code, hint? }` instead of
       a free-form message.
 - [ ] CI: cargo check (native + wasm32), `fmt --check`, `clippy -D warnings`.

@@ -142,18 +142,22 @@ async fn run_event_stream(
 ) -> anyhow::Result<()> {
     use axum::extract::ws::Message;
     use futures::SinkExt;
-    use notify::{RecursiveMode, Watcher};
 
     // notify normalizes event paths; do the same to `repo` so `strip_prefix` succeeds.
     let repo = std::fs::canonicalize(&repo).unwrap_or(repo);
 
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<notify::Event>();
     let mut watcher = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
-        if let Ok(event) = res {
-            let _ = tx.send(event);
+        match res {
+            Ok(event) => {
+                let _ = tx.send(event);
+            }
+            Err(e) => {
+                tracing::warn!("events: notify error: {e}");
+            }
         }
     })?;
-    watcher.watch(&repo, RecursiveMode::Recursive)?;
+    add_watches(&mut watcher, &repo)?;
 
     let (mut sink, mut stream) = socket.split();
     let mut pending: std::collections::HashSet<&'static str> = std::collections::HashSet::new();
@@ -195,6 +199,56 @@ async fn run_event_stream(
                     break;
                 }
             }
+        }
+    }
+    Ok(())
+}
+
+/// Walk `root` and register a `NonRecursive` watch per directory, skipping
+/// build/output dirs that would blow past `max_user_watches` (target/,
+/// node_modules/) and `.git` subtrees that are pure noise (objects/, lfs/).
+/// `RecursiveMode::Recursive` would do the same walk under the hood but
+/// without the skip list — on a repo with a populated `target/` that walks
+/// thousands of dirs and stalls badly inside Termux/PRoot.
+///
+/// New dirs created after startup won't be watched until reconnect — fine
+/// for v0.1, since the parent dir's watch still fires Create events.
+fn add_watches(
+    watcher: &mut notify::RecommendedWatcher,
+    root: &std::path::Path,
+) -> notify::Result<()> {
+    use notify::{RecursiveMode, Watcher};
+    let skip_names: &[&str] = &["target", "node_modules", ".direnv", ".venv"];
+    let skip_rel: &[&str] = &[".git/objects", ".git/lfs"];
+
+    let mut stack = vec![root.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        watcher.watch(&dir, RecursiveMode::NonRecursive)?;
+        let rd = match std::fs::read_dir(&dir) {
+            Ok(r) => r,
+            Err(_) => continue,
+        };
+        for entry in rd.flatten() {
+            // FileType::is_dir is false for symlinks, so this also skips link loops.
+            let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
+            if !is_dir {
+                continue;
+            }
+            let path = entry.path();
+            let Some(name) = path.file_name() else {
+                continue;
+            };
+            let name_s = name.to_string_lossy();
+            if skip_names.iter().any(|s| *s == name_s.as_ref()) {
+                continue;
+            }
+            if let Ok(rel) = path.strip_prefix(root) {
+                let rel_s = rel.to_string_lossy().replace('\\', "/");
+                if skip_rel.iter().any(|p| rel_s.starts_with(p)) {
+                    continue;
+                }
+            }
+            stack.push(path);
         }
     }
     Ok(())

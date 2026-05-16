@@ -17,3 +17,5 @@ gloo-timers = { version = "0.3", features = ["futures"] }
 gloo-utils = "0.2"
 js-sys = "0.3"
 urlencoding = "2"
+serde_json = { workspace = true }
+futures = { workspace = true }
