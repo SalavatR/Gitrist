@@ -1,7 +1,14 @@
 use std::net::SocketAddr;
 use std::path::PathBuf;
 
-use axum::{Json, Router, extract::Query, http::StatusCode, response::IntoResponse, routing::get};
+use axum::{
+    Json, Router,
+    extract::{Query, State},
+    http::StatusCode,
+    middleware,
+    response::IntoResponse,
+    routing::get,
+};
 use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 use tower_http::services::ServeDir;
@@ -303,6 +310,103 @@ impl IntoResponse for ApiError {
     }
 }
 
+/// Bearer token used to gate write endpoints. Generated on first
+/// launch under `$XDG_CONFIG_HOME/gitrust/token` (or
+/// `~/.config/gitrust/token`); on subsequent launches the same token
+/// is reused. Reads stay open — the server is `localhost`-only by
+/// default and there's no value in gating `summary` or `log` behind
+/// auth in a single-user GUI client.
+#[derive(Clone)]
+pub struct AuthState {
+    token: String,
+}
+
+impl AuthState {
+    /// Construct directly from a token — useful for tests that want a
+    /// known value without touching the filesystem.
+    pub fn new(token: String) -> Self {
+        Self { token }
+    }
+
+    /// Load (or create) the token at the default path.
+    pub fn from_default_path() -> anyhow::Result<Self> {
+        Ok(Self {
+            token: load_or_create_token()?,
+        })
+    }
+}
+
+fn token_path() -> anyhow::Result<PathBuf> {
+    let base = std::env::var_os("XDG_CONFIG_HOME")
+        .map(PathBuf::from)
+        .or_else(|| {
+            std::env::var_os("HOME").map(|h| {
+                let mut p = PathBuf::from(h);
+                p.push(".config");
+                p
+            })
+        })
+        .ok_or_else(|| anyhow::anyhow!("neither XDG_CONFIG_HOME nor HOME is set"))?;
+    Ok(base.join("gitrust").join("token"))
+}
+
+fn load_or_create_token() -> anyhow::Result<String> {
+    let path = token_path()?;
+    if let Ok(s) = std::fs::read_to_string(&path) {
+        let t = s.trim().to_string();
+        if t.len() >= 32 {
+            return Ok(t);
+        }
+    }
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let token = generate_token();
+    std::fs::write(&path, &token)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
+    }
+    tracing::info!("wrote new auth token to {}", path.display());
+    Ok(token)
+}
+
+fn generate_token() -> String {
+    let mut buf = [0u8; 32];
+    getrandom::getrandom(&mut buf).expect("getrandom for auth token");
+    let mut out = String::with_capacity(64);
+    for b in buf {
+        use std::fmt::Write;
+        let _ = write!(out, "{b:02x}");
+    }
+    out
+}
+
+async fn auth_token(State(auth): State<AuthState>) -> Json<serde_json::Value> {
+    Json(serde_json::json!({ "token": auth.token }))
+}
+
+/// Middleware for write endpoints — requires `Authorization: Bearer <token>`
+/// matching the loaded auth token. Currently has no consumers; will gate
+/// the upcoming stage / unstage / commit POST routes.
+#[allow(dead_code)]
+async fn require_auth(
+    State(auth): State<AuthState>,
+    req: axum::extract::Request,
+    next: middleware::Next,
+) -> Result<axum::response::Response, StatusCode> {
+    let bearer = req
+        .headers()
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|h| h.to_str().ok())
+        .and_then(|s| s.strip_prefix("Bearer "));
+    match bearer {
+        Some(t) if t == auth.token => Ok(next.run(req).await),
+        _ => Err(StatusCode::UNAUTHORIZED),
+    }
+}
+
 /// Where to source the WASM bundle from when serving the web UI.
 pub enum WebSource {
     /// Serve files from a directory on disk (e.g. `crates/gitrust-web/dist`).
@@ -315,9 +419,10 @@ pub enum WebSource {
     None,
 }
 
-pub fn router(source: WebSource) -> Router {
+pub fn router(source: WebSource, auth: AuthState) -> Router {
     let api = Router::new()
         .route("/health", get(health))
+        .route("/auth/token", get(auth_token))
         .route("/repo/summary", get(repo_summary))
         .route("/repo/log", get(repo_log))
         .route("/repo/status", get(repo_status))
@@ -328,7 +433,8 @@ pub fn router(source: WebSource) -> Router {
         .route("/repo/blob", get(repo_blob))
         .route("/repo/diff", get(repo_diff))
         .route("/repo/diff/working", get(repo_diff_working))
-        .route("/repo/events", get(repo_events));
+        .route("/repo/events", get(repo_events))
+        .with_state(auth);
 
     let mut app = Router::new().nest("/api", api);
     match source {
@@ -386,12 +492,13 @@ fn guess_content_type(path: &str) -> &'static str {
 }
 
 pub async fn serve(addr: SocketAddr, source: WebSource) -> anyhow::Result<()> {
+    let auth = AuthState::from_default_path()?;
     let listener = tokio::net::TcpListener::bind(addr).await?;
     tracing::info!(
         "gitrust-server listening on http://{}",
         listener.local_addr()?
     );
-    axum::serve(listener, router(source)).await?;
+    axum::serve(listener, router(source, auth)).await?;
     Ok(())
 }
 

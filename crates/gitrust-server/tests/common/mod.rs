@@ -92,7 +92,8 @@ impl ServerHandle {
 pub async fn spawn_server() -> ServerHandle {
     let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind 0");
     let addr = listener.local_addr().expect("local addr");
-    let router = gitrust_server::router(gitrust_server::WebSource::None);
+    let auth = gitrust_server::AuthState::new("test-token".to_string());
+    let router = gitrust_server::router(gitrust_server::WebSource::None, auth);
     let task = tokio::spawn(async move {
         let _ = axum::serve(listener, router).await;
     });

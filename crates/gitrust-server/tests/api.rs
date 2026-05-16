@@ -39,6 +39,14 @@ async fn health_returns_ok_status_and_version() {
 }
 
 #[tokio::test]
+async fn auth_token_endpoint_returns_the_active_token() {
+    let server = spawn_server().await;
+    let (status, body) = get_json(&server, "/api/auth/token", &[]).await;
+    assert_eq!(status, 200);
+    assert_eq!(body["token"], "test-token");
+}
+
+#[tokio::test]
 async fn summary_returns_head_for_real_repo() {
     let (server, r) = setup_with_initial_commit().await;
     let (status, body) = get_json(

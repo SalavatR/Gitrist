@@ -1878,6 +1878,7 @@ dependencies = [
  "anyhow",
  "axum",
  "futures",
+ "getrandom 0.2.17",
  "gitrust-core",
  "include_dir",
  "notify",
