@@ -600,6 +600,64 @@ fn run_git(repo: &Path, args: &[&str]) -> anyhow::Result<std::process::Output> {
     Ok(out)
 }
 
+/// List entries in the index that differ from HEAD — what `git diff
+/// --cached` reports. Complements `list_status`, which only covers the
+/// worktree side, so the UI can show "staged" and "unstaged" entries
+/// in separate sidebar blocks.
+pub fn list_staged(path: &Path) -> anyhow::Result<Vec<StatusEntry>> {
+    // Unborn HEAD: there's no committed tree to diff against, so every
+    // index entry is logically "added".
+    let head_present = std::process::Command::new("git")
+        .arg("-C")
+        .arg(path)
+        .args(["rev-parse", "--verify", "HEAD"])
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false);
+
+    if !head_present {
+        let out = run_git(path, &["ls-files", "--cached"])?;
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        let mut entries: Vec<StatusEntry> = stdout
+            .lines()
+            .map(|l| StatusEntry {
+                path: l.to_string(),
+                kind: "added".into(),
+            })
+            .collect();
+        entries.sort_by(|a, b| a.path.cmp(&b.path));
+        return Ok(entries);
+    }
+
+    let out = run_git(path, &["diff", "--cached", "--name-status"])?;
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let mut entries = Vec::new();
+    for line in stdout.lines() {
+        let mut parts = line.splitn(3, '\t');
+        let status = parts.next().unwrap_or("");
+        // R<score> / C<score> have an old-path then new-path; take new.
+        let path_part = if status.starts_with('R') || status.starts_with('C') {
+            parts.nth(1)
+        } else {
+            parts.next()
+        };
+        let Some(p) = path_part else {
+            continue;
+        };
+        let kind = match status.chars().next() {
+            Some('A') => "added",
+            Some('D') => "deleted",
+            _ => "modified",
+        };
+        entries.push(StatusEntry {
+            path: p.to_string(),
+            kind: kind.into(),
+        });
+    }
+    entries.sort_by(|a, b| a.path.cmp(&b.path));
+    Ok(entries)
+}
+
 /// `git add -- <files>` — move worktree blobs into the index.
 pub fn stage_files(repo: &Path, files: &[String]) -> anyhow::Result<()> {
     if files.is_empty() {

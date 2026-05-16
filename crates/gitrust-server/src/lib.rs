@@ -17,8 +17,9 @@ use tower_http::trace::TraceLayer;
 use gitrust_core::{
     BlobView, BranchInfo, CommitDiff, CommitInfo, FileDiff, RemoteBranchInfo, RepoSummary,
     StatusEntry, TagInfo, TreeEntry, commit as core_commit, diff_commit, diff_working,
-    list_branches, list_remote_branches, list_status, list_tags, list_tree, log_commits, show_blob,
-    stage_files as core_stage_files, summarize_repo, unstage_files as core_unstage,
+    list_branches, list_remote_branches, list_staged, list_status, list_tags, list_tree,
+    log_commits, show_blob, stage_files as core_stage_files, summarize_repo,
+    unstage_files as core_unstage,
 };
 
 #[derive(Serialize)]
@@ -65,6 +66,11 @@ async fn repo_log(Query(q): Query<LogQuery>) -> Result<Json<Vec<CommitInfo>>, Ap
 async fn repo_status(Query(q): Query<PathQuery>) -> Result<Json<Vec<StatusEntry>>, ApiError> {
     let path = PathBuf::from(q.path);
     list_status(&path).map(Json).map_err(ApiError::from)
+}
+
+async fn repo_staged(Query(q): Query<PathQuery>) -> Result<Json<Vec<StatusEntry>>, ApiError> {
+    let path = PathBuf::from(q.path);
+    list_staged(&path).map(Json).map_err(ApiError::from)
 }
 
 async fn repo_branches(Query(q): Query<PathQuery>) -> Result<Json<Vec<BranchInfo>>, ApiError> {
@@ -474,6 +480,7 @@ pub fn router(source: WebSource, auth: AuthState) -> Router {
         .route("/repo/summary", get(repo_summary))
         .route("/repo/log", get(repo_log))
         .route("/repo/status", get(repo_status))
+        .route("/repo/staged", get(repo_staged))
         .route("/repo/branches", get(repo_branches))
         .route("/repo/tags", get(repo_tags))
         .route("/repo/remotes", get(repo_remotes))

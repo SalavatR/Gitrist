@@ -265,6 +265,40 @@ fn commit_creates_new_commit_with_staged_changes() {
 }
 
 #[test]
+fn list_staged_reports_added_and_modified_entries() {
+    let r = TestRepo::new();
+    r.write("seed.txt", "v1\n");
+    r.git(&["add", "seed.txt"]);
+    r.git(&["commit", "-q", "-m", "init"]);
+
+    // Stage a new file and a modification of the existing one.
+    r.write("new.txt", "n\n");
+    r.write("seed.txt", "v2\n");
+    r.git(&["add", "new.txt", "seed.txt"]);
+
+    let staged = gitrust_core::list_staged(r.path()).expect("list_staged");
+    let by_path: std::collections::BTreeMap<_, _> =
+        staged.into_iter().map(|e| (e.path, e.kind)).collect();
+    assert_eq!(by_path.get("new.txt").map(String::as_str), Some("added"));
+    assert_eq!(
+        by_path.get("seed.txt").map(String::as_str),
+        Some("modified")
+    );
+}
+
+#[test]
+fn list_staged_handles_unborn_head() {
+    let r = TestRepo::new();
+    r.write("a.txt", "x\n");
+    r.git(&["add", "a.txt"]);
+    // No commit yet — HEAD is unborn.
+    let staged = gitrust_core::list_staged(r.path()).expect("list_staged on unborn HEAD");
+    assert_eq!(staged.len(), 1);
+    assert_eq!(staged[0].path, "a.txt");
+    assert_eq!(staged[0].kind, "added");
+}
+
+#[test]
 fn commit_rejects_empty_message() {
     let r = TestRepo::new();
     r.write("seed.txt", "x\n");

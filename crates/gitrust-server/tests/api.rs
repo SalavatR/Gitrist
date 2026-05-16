@@ -97,6 +97,26 @@ async fn branches_marks_head() {
 }
 
 #[tokio::test]
+async fn staged_returns_index_vs_head_entries() {
+    let (server, r) = setup_with_initial_commit().await;
+    r.write("a.txt", "v2\n");
+    r.git(&["add", "a.txt"]);
+
+    let (status, body) = get_json(
+        &server,
+        "/api/repo/staged",
+        &[("path", r.path().to_str().unwrap())],
+    )
+    .await;
+    assert_eq!(status, 200);
+    let arr = body.as_array().expect("array");
+    assert!(
+        arr.iter()
+            .any(|e| e["path"] == "a.txt" && e["kind"] == "modified")
+    );
+}
+
+#[tokio::test]
 async fn status_reports_modified_file() {
     let (server, r) = setup_with_initial_commit().await;
     r.write("a.txt", "changed\n");

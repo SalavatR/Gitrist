@@ -111,6 +111,28 @@ in this version.
 
 The list is sorted lexicographically by path.
 
+## `GET /api/repo/staged?path=<path>`
+
+Lists the diff between the index and HEAD — what `git diff --cached`
+shows. Complements `/api/repo/status`, which only reports
+worktree-vs-index. Use both together to render staged and unstaged
+files in separate sidebar blocks.
+
+```sh
+curl 'http://127.0.0.1:3737/api/repo/staged?path=/home/me/myrepo'
+```
+
+```json
+[
+  { "path": "src/main.rs", "kind": "modified" },
+  { "path": "Cargo.toml",  "kind": "added" }
+]
+```
+
+`kind` is `added` | `modified` | `deleted`. Renames and copies are
+collapsed to `modified` for the new path. On an unborn HEAD every
+index entry is reported as `added`. Sorted lexicographically.
+
 ## `GET /api/repo/branches?path=<path>`
 
 Lists local branches (`refs/heads/*`).
