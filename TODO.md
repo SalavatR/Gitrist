@@ -191,8 +191,14 @@ within each section.
       doesn't blow past inotify's `max_user_watches`. Reconnects
       with exponential backoff (500 ms → 30 s) on disconnect. The
       previous 2 s/10 s polling stays as a silent fallback.
-- [ ] Structured error envelope: `{ error, code, hint? }` instead of
-      a free-form message.
+- [x] Structured error envelope: `{ error, code, hint? }` with a
+      proper HTTP status per category. `code` is a short, stable
+      string (`repo_not_found`, `branch_unmerged`, `worktree_dirty`,
+      `permission_denied`, `bad_oid`, `already_exists`, `generic`)
+      derived heuristically from the underlying anyhow message;
+      `hint` is the human-readable next step when we can guess
+      one. UI concatenates them as `error · hint` for display.
+      Documented in docs/api.md's "Errors" section.
 - [x] CI: cargo check (native + wasm32), `fmt --check`, `clippy -D
       warnings`. GitHub Actions on Linux/macOS/Windows + GitLab
       mirror on Linux.

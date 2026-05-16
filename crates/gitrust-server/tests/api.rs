@@ -404,8 +404,9 @@ async fn force_delete_branch_drops_unmerged_branch() {
     r.git(&["commit", "-q", "-m", "ahead"]);
     r.git(&["checkout", "-q", "master"]);
 
-    // Safe delete refuses.
-    let (status, _) = post_json(
+    // Safe delete refuses — categorised as 409 Conflict with code
+    // `branch_unmerged`.
+    let (status, body) = post_json(
         &server,
         "/api/repo/branches/delete",
         Some("test-token"),
@@ -415,7 +416,8 @@ async fn force_delete_branch_drops_unmerged_branch() {
         }),
     )
     .await;
-    assert_eq!(status, 400);
+    assert_eq!(status, 409);
+    assert_eq!(body["code"], "branch_unmerged");
 
     // Force delete succeeds.
     let (status, _) = post_json(
@@ -494,14 +496,16 @@ async fn discard_reverts_worktree_change() {
 }
 
 #[tokio::test]
-async fn nonexistent_repo_returns_400_with_error_envelope() {
+async fn errors_carry_structured_envelope() {
     let server = spawn_server().await;
     let missing = format!("/nonexistent-test-repo-{}", std::process::id());
     let (status, body) =
         get_json(&server, "/api/repo/summary", &[("path", missing.as_str())]).await;
-    assert_eq!(status, 400);
+    assert_eq!(status, 404, "missing repo should map to 404 not 400");
+    assert!(body["error"].is_string());
+    assert_eq!(body["code"], "repo_not_found");
     assert!(
-        body["error"].is_string(),
-        "expected error message, got {body:?}"
+        body["hint"].as_str().is_some_and(|h| !h.is_empty()),
+        "expected a helpful hint, got {body:?}"
     );
 }

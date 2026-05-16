@@ -262,11 +262,21 @@ async fn extract_error(resp: gloo_net::http::Response) -> String {
         return "session expired — sign in again".to_string();
     }
     match resp.json::<serde_json::Value>().await {
-        Ok(v) => v
-            .get("error")
-            .and_then(|x| x.as_str())
-            .map(|s| s.to_string())
-            .unwrap_or_else(|| format!("HTTP {status}")),
+        Ok(v) => {
+            let msg = v
+                .get("error")
+                .and_then(|x| x.as_str())
+                .unwrap_or("")
+                .trim()
+                .to_string();
+            let hint = v.get("hint").and_then(|x| x.as_str()).unwrap_or("").trim();
+            match (msg.is_empty(), hint.is_empty()) {
+                (true, true) => format!("HTTP {status}"),
+                (true, false) => hint.to_string(),
+                (false, true) => msg,
+                (false, false) => format!("{msg} · {hint}"),
+            }
+        }
         Err(_) => format!("HTTP {status}"),
     }
 }

@@ -8,14 +8,34 @@ to a working directory; the server runs `gix::open(path)` on it.
 
 ## Errors
 
-Any endpoint that fails returns HTTP 400 with:
+Failed responses carry a structured envelope. The HTTP status maps
+to one of the categories below; the JSON body always has `error`
+(the raw message) and `code` (a short, stable category), plus an
+optional `hint` for cases where we can guess what went wrong.
 
 ```json
-{ "error": "<message>" }
+{
+  "error": "/nope does not appear to be a git repository",
+  "code":  "repo_not_found",
+  "hint":  "Check that the path points at a working tree or `.git` directory."
+}
 ```
 
-The message comes from the underlying `anyhow::Error` chain — usually
-a gix error such as `"<path>" does not appear to be a git repository`.
+| status | code               | meaning                                                        |
+| ------ | ------------------ | -------------------------------------------------------------- |
+| 401    | (no body)          | Missing or wrong `Authorization` / `?token=`.                  |
+| 403    | `permission_denied`| Filesystem refused access; surfaced from git.                  |
+| 404    | `repo_not_found`   | `path` is not a git working tree.                              |
+| 409    | `branch_unmerged`  | `git branch -d` refused; retry with `force: true`.             |
+| 409    | `worktree_dirty`   | Checkout would overwrite uncommitted changes.                  |
+| 409    | `already_exists`   | Target name (branch, file) is taken.                           |
+| 400    | `bad_oid`          | Caller supplied a malformed or unknown commit oid.             |
+| 400    | `generic`          | Catch-all — `error` carries the raw message; `hint` is absent. |
+
+Codes are derived heuristically from the underlying `anyhow` /
+git error string. The UI matches on `code` first when it wants to
+take a specific action (e.g. show a "force delete" confirm dialog),
+and falls back to `error · hint` for display.
 
 ## `GET /api/health`
 

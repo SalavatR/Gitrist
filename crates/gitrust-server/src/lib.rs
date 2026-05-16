@@ -472,19 +472,94 @@ fn categorize(event: &notify::Event, repo: &std::path::Path) -> Vec<&'static str
     kinds
 }
 
-struct ApiError(anyhow::Error);
+/// Wire-shape error: `{ "error": "...", "code": "...", "hint"?: "..." }`.
+/// `code` is a short, stable string the UI can match on without having
+/// to parse the human-readable message; `hint` is an optional bit of
+/// extra context for cases where we can guess what the user did wrong
+/// (wrong path, unmerged branch, etc.). Both are derived from the
+/// underlying anyhow message in [`classify`].
+struct ApiError {
+    status: StatusCode,
+    code: &'static str,
+    message: String,
+    hint: Option<&'static str>,
+}
 
 impl From<anyhow::Error> for ApiError {
     fn from(e: anyhow::Error) -> Self {
-        Self(e)
+        let message = e.to_string();
+        let (status, code, hint) = classify(&message);
+        Self {
+            status,
+            code,
+            message,
+            hint,
+        }
     }
 }
 
 impl IntoResponse for ApiError {
     fn into_response(self) -> axum::response::Response {
-        let body = serde_json::json!({ "error": self.0.to_string() });
-        (StatusCode::BAD_REQUEST, Json(body)).into_response()
+        let mut body = serde_json::json!({
+            "error": self.message,
+            "code": self.code,
+        });
+        if let Some(hint) = self.hint {
+            body["hint"] = serde_json::Value::String(hint.into());
+        }
+        (self.status, Json(body)).into_response()
     }
+}
+
+/// Map a raw `anyhow` message to a categorised (status, code, hint).
+/// The message strings here are best-effort heuristics over git / gix
+/// error wording — if a category drifts, fall back to the catch-all
+/// at the bottom which surfaces the raw message as-is.
+fn classify(message: &str) -> (StatusCode, &'static str, Option<&'static str>) {
+    let lower = message.to_lowercase();
+    if lower.contains("does not appear to be a git repository")
+        || lower.contains("not a git repository")
+    {
+        return (
+            StatusCode::NOT_FOUND,
+            "repo_not_found",
+            Some("Check that the path points at a working tree or `.git` directory."),
+        );
+    }
+    if lower.contains("not fully merged") {
+        return (
+            StatusCode::CONFLICT,
+            "branch_unmerged",
+            Some("Pass `force: true` to delete anyway, or merge the branch first."),
+        );
+    }
+    if lower.contains("would be overwritten by checkout") || lower.contains("would be overwritten")
+    {
+        return (
+            StatusCode::CONFLICT,
+            "worktree_dirty",
+            Some("Stash, commit, or discard the working-tree changes first."),
+        );
+    }
+    if lower.contains("permission denied") {
+        return (
+            StatusCode::FORBIDDEN,
+            "permission_denied",
+            Some("Check filesystem permissions on the repo path."),
+        );
+    }
+    if lower.contains("invalid oid") || lower.contains("not a valid object name") {
+        return (
+            StatusCode::BAD_REQUEST,
+            "bad_oid",
+            Some("Expected a full hex SHA — short oids aren't resolved here."),
+        );
+    }
+    if lower.contains("already exists") {
+        return (StatusCode::CONFLICT, "already_exists", None);
+    }
+    // Default — preserve the original message, no extra hint.
+    (StatusCode::BAD_REQUEST, "generic", None)
 }
 
 /// Bearer token used to gate write endpoints. Generated on first
