@@ -199,5 +199,9 @@ within each section.
 
 - [ ] Rename/copy detection in `list_status` (currently `Item::Rewrite`
       is dropped silently).
-- [ ] LICENSE-MIT and LICENSE-APACHE files at release time.
-- [ ] CONTRIBUTING.md when external contributors land.
+- [x] LICENSE-MIT and LICENSE-APACHE files at the repo root,
+      matching the `MIT OR Apache-2.0` workspace declaration.
+      Also picked up by the release workflow's archive packager.
+- [x] CONTRIBUTING.md with the quickstart, the CI gate
+      commands, commit-style notes, and the dual-license
+      contribution clause.
