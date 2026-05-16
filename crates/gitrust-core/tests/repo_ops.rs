@@ -444,6 +444,27 @@ fn checkout_switches_head() {
 }
 
 #[test]
+fn markdown_inline_emphasis_gets_classed_via_merge() {
+    let src = b"# Heading\n\nThis is **bold** text.\n";
+    let lines =
+        gitrust_core::highlight::highlight_per_line(src, "markdown").expect("markdown highlight");
+    // Line 2 is the paragraph. Block grammar alone wouldn't classify
+    // anything inside paragraphs; the inline-merge pass should
+    // surface at least one token with a non-empty class (the
+    // emphasis markers or the bold word itself).
+    let paragraph = &lines[2];
+    let has_classed = paragraph.iter().any(|t| !t.class.is_empty());
+    assert!(
+        has_classed,
+        "inline markdown merge should classify part of the bold span, got {paragraph:?}"
+    );
+    // Concatenated text should still equal the original paragraph,
+    // regardless of how the merge split it.
+    let joined: String = paragraph.iter().map(|t| t.text.as_str()).collect();
+    assert_eq!(joined, "This is **bold** text.");
+}
+
+#[test]
 fn discard_reverts_worktree_to_index() {
     let r = TestRepo::new();
     r.write("a.txt", "v1\n");

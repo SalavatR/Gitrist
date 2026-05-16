@@ -33,12 +33,14 @@ within each section.
       json, html, css, typescript, tsx, javascript, python, toml, lua,
       markdown (block-only — inline emphasis/code/links not yet wired,
       see below).
-- [ ] Markdown inline highlighting. Currently only the block grammar
-      runs; the block→inline injection chain via tree-sitter-highlight
-      doesn't surface inline events on this version, even though the
-      callback is invoked. Workaround: run inline grammar separately
-      and merge per-line tokens, preferring inline classes over
-      block's plain spans.
+- [x] Markdown inline highlighting via a two-pass merge. The block
+      grammar still runs (heading hashes, list bullets, fences) and
+      the inline grammar runs over the whole document in a second
+      pass — `merge_md_passes` walks both token streams char-by-char
+      per line and prefers the inline class wherever non-empty. The
+      injection-chain alternative still doesn't surface inline
+      events through our tree-sitter-highlight version, so this is
+      the practical workaround.
 - [x] Per-file collapse/expand for very large diffs (auto-collapse
       above 300 lines, manual via the file-header chevron).
 - [x] Side-by-side view as an alternative to the unified gutter.

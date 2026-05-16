@@ -187,7 +187,24 @@ fn config_for(lang: &str) -> Option<&'static HighlightConfiguration> {
 
 /// Highlight `bytes` and return tokens grouped by line.
 /// Returns `None` when the language isn't supported or the highlighter errors.
+///
+/// Markdown is special-cased: tree-sitter-md's block→inline injection
+/// is wired but inline events don't surface through the upstream
+/// `tree-sitter-highlight` we use. So we run the inline grammar over
+/// the whole document in a second pass and merge the two token streams
+/// per line — inline classes win where they're non-empty, the block
+/// pass owns everything else (headings, code fences, list bullets).
 pub fn highlight_per_line(bytes: &[u8], lang: &str) -> Option<Vec<Vec<Token>>> {
+    let block = highlight_one_pass(bytes, lang)?;
+    if lang == "markdown"
+        && let Some(inline) = highlight_one_pass(bytes, "markdown_inline")
+    {
+        return Some(merge_md_passes(block, inline));
+    }
+    Some(block)
+}
+
+fn highlight_one_pass(bytes: &[u8], lang: &str) -> Option<Vec<Vec<Token>>> {
     let cfg = config_for(lang)?;
     let mut highlighter = Highlighter::new();
     let events = highlighter
@@ -247,4 +264,69 @@ pub fn highlight_per_line(bytes: &[u8], lang: &str) -> Option<Vec<Vec<Token>>> {
     }
 
     Some(lines)
+}
+
+/// Walk block and inline tokens for the same document in lockstep
+/// (char by char) and pick the non-empty class. Both passes tokenize
+/// the same bytes, so concatenating the text of each line should
+/// produce identical strings — when they don't (parser disagreement
+/// on edge cases) the block line wins as a safe fallback.
+fn merge_md_passes(block: Vec<Vec<Token>>, inline: Vec<Vec<Token>>) -> Vec<Vec<Token>> {
+    let n = block.len().min(inline.len());
+    let mut out = Vec::with_capacity(block.len());
+    for i in 0..n {
+        out.push(merge_md_line(&block[i], &inline[i]));
+    }
+    // Trailing block lines (block had more lines than inline parsed) pass through.
+    for line in block.into_iter().skip(n) {
+        out.push(line);
+    }
+    out
+}
+
+fn merge_md_line(block: &[Token], inline: &[Token]) -> Vec<Token> {
+    let block_chars: Vec<(char, &str)> = block
+        .iter()
+        .flat_map(|t| t.text.chars().map(move |c| (c, t.class.as_str())))
+        .collect();
+    let inline_chars: Vec<(char, &str)> = inline
+        .iter()
+        .flat_map(|t| t.text.chars().map(move |c| (c, t.class.as_str())))
+        .collect();
+
+    if block_chars.len() != inline_chars.len() {
+        return block.to_vec();
+    }
+
+    let mut merged: Vec<Token> = Vec::new();
+    let mut cur_text = String::new();
+    let mut cur_class: Option<String> = None;
+    for (i, (ch, block_class)) in block_chars.iter().enumerate() {
+        let inline_class = inline_chars[i].1;
+        let eff = if !inline_class.is_empty() {
+            inline_class
+        } else {
+            block_class
+        };
+        match &cur_class {
+            Some(c) if c == eff => cur_text.push(*ch),
+            _ => {
+                if let Some(c) = cur_class.take() {
+                    merged.push(Token {
+                        text: std::mem::take(&mut cur_text),
+                        class: c,
+                    });
+                }
+                cur_class = Some(eff.to_string());
+                cur_text.push(*ch);
+            }
+        }
+    }
+    if let Some(c) = cur_class {
+        merged.push(Token {
+            text: cur_text,
+            class: c,
+        });
+    }
+    merged
 }
