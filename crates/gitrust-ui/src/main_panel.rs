@@ -3,8 +3,12 @@
 //! the blob viewer, the working-tree diff, and the commit diff based
 //! on which signal is non-empty.
 
+use std::collections::HashMap;
+
 use dioxus::prelude::*;
-use gitrust_types::{BlobLine, BlobView, CommitDiff, CommitInfo, FileDiff, RepoSummary};
+use gitrust_types::{
+    BlameLine, BlameView, BlobLine, BlobView, CommitDiff, CommitInfo, FileDiff, RepoSummary,
+};
 
 use crate::diff::{render_file_diff, render_line_content};
 use crate::state::BlobSelection;
@@ -183,13 +187,14 @@ pub(crate) fn render_detail(
     working_res: Resource<Result<Option<FileDiff>, String>>,
     blob_state: &Option<Result<Option<BlobView>, String>>,
     blob_res: Resource<Result<Option<BlobView>, String>>,
+    blame_state: &Option<Result<Option<BlameView>, String>>,
     selected_oid: Signal<Option<String>>,
     selected_file: Signal<Option<String>>,
     selected_blob: Signal<Option<BlobSelection>>,
     side_by_side: bool,
 ) -> Element {
     if selected_blob.read().is_some() {
-        return render_blob_viewer(blob_state, blob_res);
+        return render_blob_viewer(blob_state, blob_res, blame_state);
     }
     if let Some(file) = selected_file.read().clone() {
         return render_working_detail(working_state, working_res, &file, side_by_side);
@@ -203,6 +208,7 @@ pub(crate) fn render_detail(
 fn render_blob_viewer(
     state: &Option<Result<Option<BlobView>, String>>,
     mut res: Resource<Result<Option<BlobView>, String>>,
+    blame_state: &Option<Result<Option<BlameView>, String>>,
 ) -> Element {
     match state {
         Some(Ok(Some(b))) => {
@@ -212,6 +218,21 @@ fn render_blob_viewer(
             let is_binary = b.is_binary;
             let line_count = b.lines.len();
             let lines = b.lines.clone();
+
+            // Key blame entries by line_number so we can attach an
+            // annotation to each blob line without a per-row scan.
+            let blame_by_line: HashMap<u32, BlameLine> = blame_state
+                .as_ref()
+                .and_then(|r| r.as_ref().ok())
+                .and_then(|opt| opt.as_ref())
+                .map(|bv| {
+                    bv.lines
+                        .iter()
+                        .map(|l| (l.line_number, l.clone()))
+                        .collect()
+                })
+                .unwrap_or_default();
+
             rsx! {
                 div { class: "diff-header",
                     div { class: "title", code { class: "full-oid", "{path}" } }
@@ -225,7 +246,10 @@ fn render_blob_viewer(
                 } else {
                     div { class: "blob-viewer",
                         for l in lines {
-                            {render_blob_line(l)}
+                            {
+                                let blame = blame_by_line.get(&l.number).cloned();
+                                render_blob_line(l, blame)
+                            }
                         }
                     }
                 }
@@ -244,14 +268,42 @@ fn render_blob_viewer(
     }
 }
 
-fn render_blob_line(l: BlobLine) -> Element {
+fn render_blob_line(l: BlobLine, blame: Option<BlameLine>) -> Element {
     let n = l.number;
     let tokens = l.tokens.clone();
     let plain = l.text.clone();
     rsx! {
         div { class: "blob-line",
+            {render_blame_cell(blame)}
             span { class: "ln", "{n}" }
             span { class: "txt", {render_line_content(&tokens, &plain)} }
+        }
+    }
+}
+
+fn render_blame_cell(blame: Option<BlameLine>) -> Element {
+    let Some(b) = blame else {
+        return rsx! { span { class: "blame-col blame-empty" } };
+    };
+    // Uncommitted lines (e.g. unstaged worktree edits) come from
+    // `git blame` with the all-zero oid as a sentinel.
+    let uncommitted = b.oid.chars().all(|c| c == '0');
+    if uncommitted {
+        return rsx! {
+            span { class: "blame-col blame-uncommitted",
+                span { class: "short-oid", "·" }
+                span { class: "author", "uncommitted" }
+            }
+        };
+    }
+    let when = format_time_relative(b.time_unix);
+    let when_abs = format_time(b.time_unix);
+    let title = format!("{}\n{}\n{}", b.summary, b.author_name, when_abs);
+    rsx! {
+        span { class: "blame-col", title: "{title}",
+            span { class: "short-oid", "{b.short_oid}" }
+            span { class: "author", "{b.author_name}" }
+            span { class: "when", "{when}" }
         }
     }
 }

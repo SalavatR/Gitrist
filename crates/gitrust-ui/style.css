@@ -424,7 +424,7 @@ details.tree-folder summary.tree-folder-row::-webkit-details-marker { display: n
 }
 .blob-line {
   display: grid;
-  grid-template-columns: 4em minmax(0, 1fr);
+  grid-template-columns: 16em 4em minmax(0, 1fr);
   align-items: baseline;
   white-space: pre;
 }
@@ -440,6 +440,42 @@ details.tree-folder summary.tree-folder-row::-webkit-details-marker { display: n
 .blob-line .txt {
   padding: 0 0.85rem;
   overflow: visible;
+}
+.blame-col {
+  display: grid;
+  grid-template-columns: 5em 1fr 3.5em;
+  gap: 0.4rem;
+  align-items: baseline;
+  padding: 0 0.6rem;
+  font-size: 0.72rem;
+  color: var(--text-2);
+  border-right: 1px solid var(--border-2);
+  overflow: hidden;
+  white-space: nowrap;
+  user-select: none;
+}
+.blame-col .short-oid {
+  font-family: var(--mono);
+  color: var(--accent);
+}
+.blame-col .author {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.blame-col .when {
+  color: var(--muted);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.blame-col.blame-empty {
+  background: transparent;
+}
+.blame-col.blame-uncommitted {
+  color: var(--muted);
+  font-style: italic;
+}
+.blame-col.blame-uncommitted .short-oid {
+  color: var(--muted);
 }
 
 /* Status list */

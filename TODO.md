@@ -61,7 +61,15 @@ within each section.
       per-line tokens. Mutually exclusive with commit / working-tree
       selections — clicking one always clears the others.
 - [ ] Commit-by-oid: `/api/repo/commit?path=…&oid=…` for permalinks.
-- [ ] Blame: `/api/repo/blame?path=…&file=…`.
+- [x] Blame: `/api/repo/blame?path=…&file=…` shells out to `git
+      blame --porcelain` and returns `BlameLine` per row
+      (line_number, text, oid, short_oid, author_name,
+      time_unix, summary). UI's file viewer pairs every row in
+      `BlobView.lines` with the matching blame entry by line
+      number and renders an annotation column to the left of
+      the line number gutter. Uncommitted lines come back with
+      git's all-zero oid sentinel and get an "uncommitted"
+      treatment.
 
 ## Writes (need auth first)
 

@@ -3,7 +3,7 @@
 //! cheap for non-WASM contributors.
 
 use dioxus::prelude::*;
-use gitrust_types::{BlobView, CommitDiff, FileDiff};
+use gitrust_types::{BlameView, BlobView, CommitDiff, FileDiff};
 
 mod diff;
 mod fetch;
@@ -15,8 +15,8 @@ mod time_fmt;
 mod ws;
 
 use fetch::{
-    fetch_blob, fetch_branches, fetch_diff, fetch_diff_working, fetch_log, fetch_remotes,
-    fetch_staged, fetch_status, fetch_summary, fetch_tags, fetch_tree,
+    fetch_blame, fetch_blob, fetch_branches, fetch_diff, fetch_diff_working, fetch_log,
+    fetch_remotes, fetch_staged, fetch_status, fetch_summary, fetch_tags, fetch_tree,
 };
 use main_panel::{render_commit_form, render_detail, render_log, render_summary_card};
 use sidebar::{
@@ -196,6 +196,23 @@ fn AppContent() -> Element {
     use_effect(move || {
         if let Some(v) = blob_view.read_unchecked().clone() {
             blob_view_stale.set(Some(v));
+        }
+    });
+
+    let blame_view = use_resource(move || {
+        let path = current_repo.read().clone();
+        let sel = selected_blob.read().clone();
+        async move {
+            match sel {
+                Some(b) => fetch_blame(&path, &b.path).await.map(Some),
+                None => Ok::<_, String>(None),
+            }
+        }
+    });
+    let mut blame_view_stale = use_signal(|| None::<Result<Option<BlameView>, String>>);
+    use_effect(move || {
+        if let Some(v) = blame_view.read_unchecked().clone() {
+            blame_view_stale.set(Some(v));
         }
     });
     let diff = use_resource(move || {
@@ -415,6 +432,7 @@ fn AppContent() -> Element {
                             working_diff,
                             &blob_view_stale.read_unchecked(),
                             blob_view,
+                            &blame_view_stale.read_unchecked(),
                             selected_oid,
                             selected_file,
                             selected_blob,

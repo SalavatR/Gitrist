@@ -4,8 +4,8 @@
 //! only needs the crate to compile for `cargo check` / docs).
 
 use gitrust_types::{
-    BlobView, BranchInfo, CommitDiff, CommitInfo, FileDiff, RemoteBranchInfo, RepoSummary,
-    StatusEntry, TagInfo, TreeEntry,
+    BlameView, BlobView, BranchInfo, CommitDiff, CommitInfo, FileDiff, RemoteBranchInfo,
+    RepoSummary, StatusEntry, TagInfo, TreeEntry,
 };
 
 // `q` percent-encodes a single query-string value. Paths can contain
@@ -71,6 +71,16 @@ pub(crate) async fn fetch_diff(path: &str, oid: &str) -> Result<CommitDiff, Stri
 pub(crate) async fn fetch_diff_working(path: &str, file: &str) -> Result<FileDiff, String> {
     fetch_json(&format!(
         "/api/repo/diff/working?path={}&file={}",
+        q(path),
+        q(file),
+    ))
+    .await
+}
+
+#[cfg(target_arch = "wasm32")]
+pub(crate) async fn fetch_blame(path: &str, file: &str) -> Result<BlameView, String> {
+    fetch_json(&format!(
+        "/api/repo/blame?path={}&file={}",
         q(path),
         q(file),
     ))
@@ -234,6 +244,11 @@ pub(crate) async fn fetch_diff(_path: &str, _oid: &str) -> Result<CommitDiff, St
 
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) async fn fetch_diff_working(_path: &str, _file: &str) -> Result<FileDiff, String> {
+    Err("native build: fetching not implemented".into())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) async fn fetch_blame(_path: &str, _file: &str) -> Result<BlameView, String> {
     Err("native build: fetching not implemented".into())
 }
 
