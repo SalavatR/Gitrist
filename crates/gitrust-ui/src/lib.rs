@@ -15,13 +15,14 @@ mod time_fmt;
 mod ws;
 
 use fetch::{
-    fetch_blob, fetch_branches, fetch_diff, fetch_diff_working, fetch_log, fetch_remotes,
-    fetch_status, fetch_summary, fetch_tags, fetch_tree,
+    fetch_auth_token, fetch_blob, fetch_branches, fetch_diff, fetch_diff_working, fetch_log,
+    fetch_remotes, fetch_staged, fetch_status, fetch_summary, fetch_tags, fetch_tree,
 };
-use main_panel::{render_detail, render_log, render_summary_card};
+use main_panel::{render_commit_form, render_detail, render_log, render_summary_card};
 use sidebar::{
-    render_branch_count, render_branches, render_remote_count, render_remotes, render_status,
-    render_status_count, render_tag_count, render_tags, render_tree, render_tree_count,
+    render_branch_count, render_branches, render_remote_count, render_remotes, render_staged,
+    render_staged_count, render_status, render_status_count, render_tag_count, render_tags,
+    render_tree, render_tree_count,
 };
 use state::{
     BlobSelection, LOG_LIMIT, REFS_POLL_INTERVAL_MS, STATUS_POLL_INTERVAL_MS, ThemeMode,
@@ -41,6 +42,17 @@ pub fn App() -> Element {
     let mut side_by_side = use_signal(initial_side_by_side);
     let mut recent = use_signal(recent_repos);
     let mut theme = use_signal(initial_theme);
+    let mut auth_token = use_signal(|| None::<String>);
+    let commit_msg = use_signal(String::new);
+    let commit_err = use_signal(|| None::<String>);
+
+    use_future(move || async move {
+        if let Ok(t) = fetch_auth_token().await {
+            auth_token.set(Some(t));
+        }
+        // Silent failure: writes will surface a 401 if the token never
+        // landed. Reads keep working either way.
+    });
 
     use_effect(move || {
         let path = current_repo.read().clone();
@@ -68,6 +80,10 @@ pub fn App() -> Element {
     let mut status = use_resource(move || {
         let path = current_repo.read().clone();
         async move { fetch_status(&path).await }
+    });
+    let staged = use_resource(move || {
+        let path = current_repo.read().clone();
+        async move { fetch_staged(&path).await }
     });
     let branches = use_resource(move || {
         let path = current_repo.read().clone();
@@ -109,6 +125,7 @@ pub fn App() -> Element {
             summary,
             log,
             status,
+            staged,
             branches,
             tags,
             remotes,
@@ -238,6 +255,18 @@ pub fn App() -> Element {
                     }
                     section { class: "side-block",
                         div { class: "side-title",
+                            span { "Staged" }
+                            {render_staged_count(&staged.read_unchecked())}
+                        }
+                        {render_staged(
+                            &staged.read_unchecked(),
+                            staged,
+                            current_repo,
+                            auth_token,
+                        )}
+                    }
+                    section { class: "side-block",
+                        div { class: "side-title",
                             span { "Working tree" }
                             {render_status_count(&status.read_unchecked())}
                         }
@@ -247,6 +276,8 @@ pub fn App() -> Element {
                             selected_oid,
                             selected_file,
                             selected_blob,
+                            current_repo,
+                            auth_token,
                         )}
                     }
                     section { class: "side-block",
@@ -266,6 +297,15 @@ pub fn App() -> Element {
 
                 main { class: "main",
                     {render_summary_card(&summary.read_unchecked(), summary)}
+
+                    {
+                        let count = staged.read_unchecked()
+                            .as_ref()
+                            .and_then(|r| r.as_ref().ok())
+                            .map(|v| v.len())
+                            .unwrap_or(0);
+                        render_commit_form(commit_msg, commit_err, count, current_repo, auth_token)
+                    }
 
                     section { class: "main-block",
                         h2 { "History" }

@@ -10,6 +10,62 @@ use crate::diff::{render_file_diff, render_line_content};
 use crate::state::BlobSelection;
 use crate::time_fmt::{format_time, format_time_relative};
 
+pub(crate) fn render_commit_form(
+    mut message: Signal<String>,
+    mut error: Signal<Option<String>>,
+    staged_count: usize,
+    current_repo: Signal<String>,
+    auth_token: Signal<Option<String>>,
+) -> Element {
+    let msg_text = message.read().clone();
+    let can_submit = !msg_text.trim().is_empty() && staged_count > 0;
+    let err_text = error.read().clone();
+    rsx! {
+        section { class: "commit-form",
+            h2 { "Commit" }
+            textarea {
+                class: "commit-msg",
+                placeholder: "Subject line, then optionally a body…",
+                value: "{msg_text}",
+                rows: "3",
+                oninput: move |e| {
+                    message.set(e.value());
+                    error.set(None);
+                },
+            }
+            div { class: "commit-row",
+                if staged_count == 0 {
+                    span { class: "muted small", "Nothing staged." }
+                } else {
+                    span { class: "muted small", "{staged_count} staged" }
+                }
+                button {
+                    class: "commit-btn",
+                    disabled: !can_submit,
+                    onclick: move |_| {
+                        let path = current_repo.read().clone();
+                        let token = auth_token.read().clone().unwrap_or_default();
+                        let body = message.read().clone();
+                        spawn(async move {
+                            match crate::fetch::post_commit(&path, &body, &token).await {
+                                Ok(_) => {
+                                    message.set(String::new());
+                                    error.set(None);
+                                }
+                                Err(e) => error.set(Some(e)),
+                            }
+                        });
+                    },
+                    "Commit"
+                }
+            }
+            if let Some(e) = err_text {
+                p { class: "err small", "Commit failed: {e}" }
+            }
+        }
+    }
+}
+
 pub(crate) fn render_summary_card(
     state: &Option<Result<RepoSummary, String>>,
     mut res: Resource<Result<RepoSummary, String>>,

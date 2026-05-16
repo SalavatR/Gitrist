@@ -298,12 +298,15 @@ pub(crate) fn render_remotes(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn render_status(
     state: &Option<Result<Vec<StatusEntry>, String>>,
     mut res: Resource<Result<Vec<StatusEntry>, String>>,
     mut selected_oid: Signal<Option<String>>,
     mut selected_file: Signal<Option<String>>,
     mut selected_blob: Signal<Option<BlobSelection>>,
+    current_repo: Signal<String>,
+    auth_token: Signal<Option<String>>,
 ) -> Element {
     match state {
         Some(Ok(entries)) if entries.is_empty() => {
@@ -316,6 +319,7 @@ pub(crate) fn render_status(
                     for e in rows {
                         {
                             let path = e.path.clone();
+                            let path_for_stage = e.path.clone();
                             let path_for_class = e.path.clone();
                             let is_selected = selected_file.read().as_deref() == Some(path_for_class.as_str());
                             rsx! {
@@ -337,6 +341,15 @@ pub(crate) fn render_status(
                                         {status_glyph(&e.kind)}
                                     }
                                     span { class: "path", "{e.path}" }
+                                    button {
+                                        class: "stage-btn",
+                                        title: "Stage this file",
+                                        onclick: move |evt| {
+                                            evt.stop_propagation();
+                                            stage_one(path_for_stage.clone(), current_repo, auth_token);
+                                        },
+                                        "+"
+                                    }
                                 }
                             }
                         }
@@ -355,6 +368,87 @@ pub(crate) fn render_status(
         }
         None => rsx! { p { class: "muted small", "Loading…" } },
     }
+}
+
+pub(crate) fn render_staged_count(state: &Option<Result<Vec<StatusEntry>, String>>) -> Element {
+    if let Some(Ok(s)) = state {
+        let n = s.len();
+        if n == 0 {
+            rsx! {}
+        } else {
+            rsx! { span { class: "count", "{n}" } }
+        }
+    } else {
+        rsx! {}
+    }
+}
+
+pub(crate) fn render_staged(
+    state: &Option<Result<Vec<StatusEntry>, String>>,
+    mut res: Resource<Result<Vec<StatusEntry>, String>>,
+    current_repo: Signal<String>,
+    auth_token: Signal<Option<String>>,
+) -> Element {
+    match state {
+        Some(Ok(entries)) if entries.is_empty() => {
+            rsx! { p { class: "muted small", "Nothing staged." } }
+        }
+        Some(Ok(entries)) => {
+            let rows = entries.clone();
+            rsx! {
+                ul { class: "status-list",
+                    for e in rows {
+                        {
+                            let p = e.path.clone();
+                            rsx! {
+                                li { key: "{e.path}",
+                                    span { class: "badge badge-{e.kind}", title: "{e.kind}",
+                                        {status_glyph(&e.kind)}
+                                    }
+                                    span { class: "path", "{e.path}" }
+                                    button {
+                                        class: "stage-btn unstage",
+                                        title: "Unstage this file",
+                                        onclick: move |evt| {
+                                            evt.stop_propagation();
+                                            unstage_one(p.clone(), current_repo, auth_token);
+                                        },
+                                        "−"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Some(Err(e)) => {
+            let msg = e.clone();
+            rsx! {
+                p { class: "err small",
+                    "Error: {msg} "
+                    button { class: "retry-btn", onclick: move |_| res.restart(), "Retry" }
+                }
+            }
+        }
+        None => rsx! { p { class: "muted small", "Loading…" } },
+    }
+}
+
+fn stage_one(file: String, current_repo: Signal<String>, auth_token: Signal<Option<String>>) {
+    let path = current_repo.read().clone();
+    let token = auth_token.read().clone().unwrap_or_default();
+    spawn(async move {
+        let _ = crate::fetch::post_stage(&path, &[file], &token).await;
+    });
+}
+
+fn unstage_one(file: String, current_repo: Signal<String>, auth_token: Signal<Option<String>>) {
+    let path = current_repo.read().clone();
+    let token = auth_token.read().clone().unwrap_or_default();
+    spawn(async move {
+        let _ = crate::fetch::post_unstage(&path, &[file], &token).await;
+    });
 }
 
 fn status_glyph(kind: &str) -> &'static str {

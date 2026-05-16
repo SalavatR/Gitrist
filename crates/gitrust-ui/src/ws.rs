@@ -19,6 +19,7 @@ pub(crate) struct LiveResources {
     pub summary: Resource<Result<RepoSummary, String>>,
     pub log: Resource<Result<Vec<CommitInfo>, String>>,
     pub status: Resource<Result<Vec<StatusEntry>, String>>,
+    pub staged: Resource<Result<Vec<StatusEntry>, String>>,
     pub branches: Resource<Result<Vec<BranchInfo>, String>>,
     pub tags: Resource<Result<Vec<TagInfo>, String>>,
     pub remotes: Resource<Result<Vec<RemoteBranchInfo>, String>>,
@@ -32,6 +33,7 @@ impl LiveResources {
                 self.summary.restart();
                 self.log.restart();
                 self.status.restart();
+                self.staged.restart();
                 self.branches.restart();
                 self.tags.restart();
                 self.remotes.restart();
@@ -45,7 +47,11 @@ impl LiveResources {
                 self.remotes.restart();
                 self.tree.restart();
             }
-            "index_changed" | "worktree_changed" => {
+            "index_changed" => {
+                self.status.restart();
+                self.staged.restart();
+            }
+            "worktree_changed" => {
                 self.status.restart();
             }
             _ => {}
