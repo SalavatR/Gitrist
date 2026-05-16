@@ -151,13 +151,18 @@ within each section.
 - [x] CI matrix building default + `desktop`-feature configurations
       on ubuntu / macos / windows. Linux desktop job installs
       webkit2gtk-4.1 + libsoup-3.0.
-- [x] Native menu bar via `muda`: File → Quit (Cmd-Q / Ctrl-Q)
-      and View → Reload (Cmd-R / Ctrl-R). Platform glue: macOS
-      `init_for_nsapp`, Linux `init_for_gtk_window` against
-      tao's `WindowExtUnix::gtk_window()`, Windows
-      `init_for_hwnd`. Errors during init are non-fatal — the
-      keyboard handler below still serves as fallback. File →
-      Open Repo and a full About item are still pending.
+- [x] Native menu bar via `muda`:
+        File → Open Repo… (Cmd-O / Ctrl-O), separator, Quit
+        View → Reload
+        Help → About gitrust
+      Open Repo… pops the rfd folder picker and navigates the
+      webview to the bootstrap URL with the picked path
+      URL-encoded into the hash; the UI's existing hash parser
+      picks it up. About uses `rfd::MessageDialog` so the dialog
+      is native on each platform. Platform glue covers macOS,
+      Linux (GTK), and Windows; the keyboard fallback from a
+      previous commit still serves as a safety net if menu init
+      ever fails.
 - [x] System keyboard shortcuts handled inside `gitrust app`'s
       event loop: Cmd-R / Ctrl-R reloads the webview, Cmd-Q /
       Ctrl-Q and Cmd-W / Ctrl-W exit. Modifier key follows the

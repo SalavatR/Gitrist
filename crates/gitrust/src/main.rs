@@ -152,7 +152,7 @@ fn desktop_supported() -> bool {
 #[cfg(feature = "desktop")]
 fn open_window(url: &str) -> Result<()> {
     use muda::accelerator::{Accelerator, Code, Modifiers};
-    use muda::{Menu, MenuEvent, MenuItem, Submenu};
+    use muda::{Menu, MenuEvent, MenuItem, PredefinedMenuItem, Submenu};
     use tao::event::{ElementState, Event, WindowEvent};
     use tao::event_loop::{ControlFlow, EventLoop};
     use tao::keyboard::{Key, ModifiersState};
@@ -173,13 +173,22 @@ fn open_window(url: &str) -> Result<()> {
     };
 
     let menu = Menu::new();
+
     let file_menu = Submenu::new("File", true);
+    let open_item = MenuItem::new(
+        "Open Repo…",
+        true,
+        Some(Accelerator::new(Some(primary), Code::KeyO)),
+    );
     let quit_item = MenuItem::new(
         "Quit",
         true,
         Some(Accelerator::new(Some(primary), Code::KeyQ)),
     );
+    file_menu.append(&open_item).ok();
+    file_menu.append(&PredefinedMenuItem::separator()).ok();
     file_menu.append(&quit_item).ok();
+
     let view_menu = Submenu::new("View", true);
     let reload_item = MenuItem::new(
         "Reload",
@@ -187,8 +196,14 @@ fn open_window(url: &str) -> Result<()> {
         Some(Accelerator::new(Some(primary), Code::KeyR)),
     );
     view_menu.append(&reload_item).ok();
+
+    let help_menu = Submenu::new("Help", true);
+    let about_item = MenuItem::new("About gitrust", true, None);
+    help_menu.append(&about_item).ok();
+
     menu.append(&file_menu).ok();
     menu.append(&view_menu).ok();
+    menu.append(&help_menu).ok();
 
     // Platform glue. Errors are non-fatal — the keyboard handler below
     // still provides Cmd-Q / Cmd-R fallbacks if the menu fails to attach.
@@ -213,20 +228,48 @@ fn open_window(url: &str) -> Result<()> {
     let menu_channel = MenuEvent::receiver();
     let quit_id = quit_item.id().clone();
     let reload_id = reload_item.id().clone();
+    let open_id = open_item.id().clone();
+    let about_id = about_item.id().clone();
+    let bootstrap_url = url.to_string();
     let mut modifiers = ModifiersState::empty();
 
     event_loop.run(move |event, _, control_flow| {
         *control_flow = ControlFlow::Wait;
 
-        // Menu accelerators arrive here; the OS routed Cmd-Q / Cmd-R
-        // through the menu bar rather than the webview.
+        // Menu accelerators arrive here; the OS routed Cmd-Q / Cmd-R /
+        // Cmd-O through the menu bar rather than the webview.
         if let Ok(menu_event) = menu_channel.try_recv() {
             if menu_event.id == quit_id {
                 *control_flow = ControlFlow::Exit;
                 return;
             }
             if menu_event.id == reload_id {
-                let _ = webview.load_url(url);
+                let _ = webview.load_url(&bootstrap_url);
+                return;
+            }
+            if menu_event.id == open_id {
+                if let Some(picked) = rfd::FileDialog::new()
+                    .set_title("Open a git repository")
+                    .pick_folder()
+                {
+                    let path = picked.display().to_string();
+                    let new_url = format!(
+                        "{}/#{}",
+                        bootstrap_url.trim_end_matches('/'),
+                        urlencoding::encode(&path)
+                    );
+                    let _ = webview.load_url(&new_url);
+                }
+                return;
+            }
+            if menu_event.id == about_id {
+                let version = env!("CARGO_PKG_VERSION");
+                rfd::MessageDialog::new()
+                    .set_title("About gitrust")
+                    .set_description(format!(
+                        "gitrust {version}\n\nSelf-hosted Rust GUI git client.\nhttps://github.com/SalavatR/Gitrist"
+                    ))
+                    .show();
                 return;
             }
         }

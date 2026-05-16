@@ -2132,10 +2132,12 @@ dependencies = [
  "gtk",
  "include_dir",
  "muda",
+ "rfd",
  "tao",
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "urlencoding",
  "wry",
 ]
 
