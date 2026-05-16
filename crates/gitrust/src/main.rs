@@ -223,14 +223,16 @@ fn open_window(url: &str) -> Result<()> {
         let _ = unsafe { menu.init_for_hwnd(window.hwnd() as _) };
     }
 
-    let webview = WebViewBuilder::new().with_url(url).build(&window)?;
+    let bootstrap_url = url.to_string();
+    let webview = WebViewBuilder::new()
+        .with_url(bootstrap_url.clone())
+        .build(&window)?;
 
     let menu_channel = MenuEvent::receiver();
     let quit_id = quit_item.id().clone();
     let reload_id = reload_item.id().clone();
     let open_id = open_item.id().clone();
     let about_id = about_item.id().clone();
-    let bootstrap_url = url.to_string();
     let mut modifiers = ModifiersState::empty();
 
     event_loop.run(move |event, _, control_flow| {
