@@ -60,7 +60,10 @@ within each section.
       content. New `/api/repo/blob` endpoint serves blobs with
       per-line tokens. Mutually exclusive with commit / working-tree
       selections — clicking one always clears the others.
-- [ ] Commit-by-oid: `/api/repo/commit?path=…&oid=…` for permalinks.
+- [x] Commit-by-oid: `GET /api/repo/commit?path=…&oid=…` returns
+      the same `CommitInfo` shape as `/api/repo/log` entries but
+      resolved directly via gix — useful for permalinks without
+      re-walking history.
 - [x] Blame: `/api/repo/blame?path=…&file=…` shells out to `git
       blame --porcelain` and returns `BlameLine` per row
       (line_number, text, oid, short_oid, author_name,
@@ -86,9 +89,23 @@ within each section.
       Author identity comes from the repo's gitconfig. UI exposes
       it as a textarea + Commit button between the summary card
       and the history table; disabled when nothing is staged.
-- [ ] Branch ops: create, rename, delete, checkout.
-- [ ] Discard worktree changes for a file (`git restore <file>`).
-- [ ] Commit body / author override on the commit endpoint.
+- [x] Branch ops (partial): create (with optional `switch=true` for
+      `git checkout -b`), delete (safe; refuses unmerged), and
+      checkout, all under `/api/repo/branches/{create,delete}` and
+      `/api/repo/checkout`. Sidebar branch list grows hover-revealed
+      `→` (switch) and `×` (delete) buttons per non-HEAD entry, plus
+      a `New branch` input + Create button at the bottom that does
+      create-and-switch in one shot. Rename and force-delete are
+      still pending.
+- [x] Discard worktree changes for a file (`git restore <file>`).
+      `POST /api/repo/discard` and a `↺` button next to each
+      "Working tree" entry, hover-revealed alongside the stage `+`.
+- [x] Commit body / author override on the commit endpoint. Body
+      already worked (newlines in `message`; git uses the first line
+      as the subject). Author is now an optional `author` field on
+      the POST body, forwarded as `--author=<Name <email>>`. UI
+      doesn't expose an author field yet — server is ready when it
+      does.
 
 ## UX
 

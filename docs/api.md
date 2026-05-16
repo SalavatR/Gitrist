@@ -531,6 +531,43 @@ All three endpoints return 401 on a missing or wrong `Authorization`
 header and 400 with the usual `{ "error": "…" }` envelope on a
 git-level failure (no staged changes, dirty index, etc.).
 
+### `POST /api/repo/discard`
+
+Same body shape as `/stage`. Reverts each path in the worktree
+to whatever's in the index (`git restore -- <files>`). Untracked
+files don't have an index entry; passing them returns 400.
+
+### `POST /api/repo/branches/create`
+
+```json
+{ "path": "...", "name": "feature", "from": null, "switch": true }
+```
+
+`from` is the start revision — branch name, tag, or commit oid;
+`null` (or omitted) means current HEAD. `switch: true` checks
+out the new branch in the same step (`git checkout -b`); `false`
+just creates it.
+
+### `POST /api/repo/branches/delete`
+
+```json
+{ "path": "...", "name": "feature" }
+```
+
+Safe delete — uses `git branch -d`, so unmerged branches refuse
+and surface a `not fully merged` error. The UI offers no force
+toggle yet; users have to drop into `git branch -D` for that.
+
+### `POST /api/repo/checkout`
+
+```json
+{ "path": "...", "target": "feature" }
+```
+
+`target` may be any rev git understands: branch name, tag, or
+commit oid (detached HEAD). Refuses when local changes would be
+overwritten.
+
 ## `GET /api/repo/events?path=<path>` (WebSocket)
 
 Live filesystem-event stream for one repo. Clients send the standard

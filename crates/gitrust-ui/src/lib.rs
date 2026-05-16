@@ -99,6 +99,7 @@ fn AppContent() -> Element {
     let mut theme = use_signal(initial_theme);
     let commit_msg = use_signal(String::new);
     let commit_err = use_signal(|| None::<String>);
+    let new_branch = use_signal(String::new);
 
     use_effect(move || {
         let path = current_repo.read().clone();
@@ -328,7 +329,12 @@ fn AppContent() -> Element {
                             span { "Branches" }
                             {render_branch_count(&branches.read_unchecked())}
                         }
-                        {render_branches(&branches.read_unchecked(), branches)}
+                        {render_branches(
+                            &branches.read_unchecked(),
+                            branches,
+                            current_repo,
+                            new_branch,
+                        )}
                     }
                     section { class: "side-block",
                         div { class: "side-title",

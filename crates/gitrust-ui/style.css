@@ -910,6 +910,79 @@ details.file-diff[open] .disclosure::before { content: "▾"; }
   border-color: var(--del);
   color: var(--del);
 }
+.stage-btn.discard:hover {
+  background: var(--modified-bg);
+  border-color: var(--modified);
+  color: var(--modified);
+}
+
+/* Per-branch row actions (switch / delete), revealed on hover of the row. */
+.branch-list li { position: relative; }
+.branch-act {
+  margin-left: 0.3rem;
+  padding: 0 0.4rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  color: var(--text-2);
+  cursor: pointer;
+  font-size: 0.85rem;
+  line-height: 1.2rem;
+  font-weight: 600;
+  visibility: hidden;
+}
+.branch-list li:hover .branch-act { visibility: visible; }
+.branch-act.switch:hover {
+  background: var(--accent-bg);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.branch-act.delete:hover {
+  background: var(--del-bg);
+  border-color: var(--del);
+  color: var(--del);
+}
+
+/* New-branch form below the branch list. */
+.new-branch {
+  display: flex;
+  gap: 0.35rem;
+  margin-top: 0.45rem;
+}
+.new-branch input {
+  flex: 1;
+  min-width: 0;
+  padding: 0.3rem 0.5rem;
+  font-size: 0.82rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  color: var(--text);
+  outline: none;
+}
+.new-branch input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-bg);
+}
+.new-branch-btn {
+  padding: 0.3rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  color: var(--text-2);
+  cursor: pointer;
+  font-size: 0.82rem;
+  font-weight: 500;
+}
+.new-branch-btn:hover:not(:disabled) {
+  background: var(--accent-bg);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.new-branch-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
 
 /* Commit form between the summary card and history. */
 .commit-form {

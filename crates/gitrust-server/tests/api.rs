@@ -358,6 +358,82 @@ async fn commit_post_honours_author_override() {
 }
 
 #[tokio::test]
+async fn create_branch_with_switch_lands_on_new_head() {
+    let (server, r) = setup_with_initial_commit().await;
+    let (status, _) = post_json(
+        &server,
+        "/api/repo/branches/create",
+        Some("test-token"),
+        serde_json::json!({
+            "path": r.path().to_str().unwrap(),
+            "name": "feature",
+            "switch": true,
+        }),
+    )
+    .await;
+    assert_eq!(status, 204);
+    let head = r.git(&["symbolic-ref", "--short", "HEAD"]);
+    assert_eq!(head.trim(), "feature");
+}
+
+#[tokio::test]
+async fn delete_branch_drops_a_merged_branch() {
+    let (server, r) = setup_with_initial_commit().await;
+    r.git(&["branch", "doomed"]);
+    let (status, _) = post_json(
+        &server,
+        "/api/repo/branches/delete",
+        Some("test-token"),
+        serde_json::json!({
+            "path": r.path().to_str().unwrap(),
+            "name": "doomed",
+        }),
+    )
+    .await;
+    assert_eq!(status, 204);
+    let listing = r.git(&["branch"]);
+    assert!(!listing.lines().any(|l| l.contains("doomed")));
+}
+
+#[tokio::test]
+async fn checkout_switches_head() {
+    let (server, r) = setup_with_initial_commit().await;
+    r.git(&["branch", "side"]);
+    let (status, _) = post_json(
+        &server,
+        "/api/repo/checkout",
+        Some("test-token"),
+        serde_json::json!({
+            "path": r.path().to_str().unwrap(),
+            "target": "side",
+        }),
+    )
+    .await;
+    assert_eq!(status, 204);
+    let head = r.git(&["symbolic-ref", "--short", "HEAD"]);
+    assert_eq!(head.trim(), "side");
+}
+
+#[tokio::test]
+async fn discard_reverts_worktree_change() {
+    let (server, r) = setup_with_initial_commit().await;
+    r.write("a.txt", "changed\n");
+    let (status, _) = post_json(
+        &server,
+        "/api/repo/discard",
+        Some("test-token"),
+        serde_json::json!({
+            "path": r.path().to_str().unwrap(),
+            "files": ["a.txt"],
+        }),
+    )
+    .await;
+    assert_eq!(status, 204);
+    let on_disk = std::fs::read_to_string(r.path().join("a.txt")).unwrap();
+    assert_eq!(on_disk, "hello\n");
+}
+
+#[tokio::test]
 async fn nonexistent_repo_returns_400_with_error_envelope() {
     let server = spawn_server().await;
     let missing = format!("/nonexistent-test-repo-{}", std::process::id());

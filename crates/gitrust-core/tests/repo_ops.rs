@@ -367,6 +367,99 @@ fn commit_info_resolves_by_oid() {
 }
 
 #[test]
+fn create_branch_with_switch_lands_on_new_head() {
+    let r = TestRepo::new();
+    r.write("a", "x");
+    r.git(&["add", "a"]);
+    r.git(&["commit", "-q", "-m", "init"]);
+
+    gitrust_core::create_branch(r.path(), "feature", None, true).expect("create+switch");
+    let cur = r.git(&["symbolic-ref", "--short", "HEAD"]);
+    assert_eq!(cur.trim(), "feature");
+
+    let bs = gitrust_core::list_branches(r.path()).expect("list");
+    let names: std::collections::BTreeSet<&str> = bs.iter().map(|b| b.name.as_str()).collect();
+    assert!(names.contains("master"));
+    assert!(names.contains("feature"));
+}
+
+#[test]
+fn create_branch_without_switch_keeps_head() {
+    let r = TestRepo::new();
+    r.write("a", "x");
+    r.git(&["add", "a"]);
+    r.git(&["commit", "-q", "-m", "init"]);
+
+    gitrust_core::create_branch(r.path(), "feature", None, false).expect("create");
+    let cur = r.git(&["symbolic-ref", "--short", "HEAD"]);
+    assert_eq!(cur.trim(), "master");
+}
+
+#[test]
+fn delete_branch_removes_a_merged_branch() {
+    let r = TestRepo::new();
+    r.write("a", "x");
+    r.git(&["add", "a"]);
+    r.git(&["commit", "-q", "-m", "init"]);
+    r.git(&["branch", "doomed"]);
+
+    gitrust_core::delete_branch(r.path(), "doomed").expect("delete");
+    let bs = gitrust_core::list_branches(r.path()).expect("list");
+    assert!(!bs.iter().any(|b| b.name == "doomed"));
+}
+
+#[test]
+fn delete_branch_refuses_unmerged() {
+    let r = TestRepo::new();
+    r.write("a", "x");
+    r.git(&["add", "a"]);
+    r.git(&["commit", "-q", "-m", "init"]);
+    r.git(&["checkout", "-q", "-b", "diverge"]);
+    r.write("b", "y");
+    r.git(&["add", "b"]);
+    r.git(&["commit", "-q", "-m", "ahead"]);
+    r.git(&["checkout", "-q", "master"]);
+
+    let err = gitrust_core::delete_branch(r.path(), "diverge").expect_err("should refuse");
+    assert!(
+        err.to_string().to_lowercase().contains("not fully merged")
+            || err.to_string().to_lowercase().contains("delete branch"),
+        "expected unmerged-branch hint, got `{err}`"
+    );
+}
+
+#[test]
+fn checkout_switches_head() {
+    let r = TestRepo::new();
+    r.write("a", "x");
+    r.git(&["add", "a"]);
+    r.git(&["commit", "-q", "-m", "init"]);
+    r.git(&["branch", "side"]);
+
+    gitrust_core::checkout(r.path(), "side").expect("checkout side");
+    assert_eq!(r.git(&["symbolic-ref", "--short", "HEAD"]).trim(), "side");
+
+    gitrust_core::checkout(r.path(), "master").expect("checkout master");
+    assert_eq!(r.git(&["symbolic-ref", "--short", "HEAD"]).trim(), "master");
+}
+
+#[test]
+fn discard_reverts_worktree_to_index() {
+    let r = TestRepo::new();
+    r.write("a.txt", "v1\n");
+    r.git(&["add", "a.txt"]);
+    r.git(&["commit", "-q", "-m", "init"]);
+    r.write("a.txt", "v2\n");
+    // Unstaged worktree change — discard should drop it.
+    gitrust_core::discard_files(r.path(), &["a.txt".to_string()]).expect("discard");
+
+    let on_disk = std::fs::read_to_string(r.path().join("a.txt")).unwrap();
+    assert_eq!(on_disk, "v1\n");
+    let st = gitrust_core::list_status(r.path()).unwrap();
+    assert!(!st.iter().any(|e| e.path == "a.txt"));
+}
+
+#[test]
 fn commit_info_rejects_garbage_oid() {
     let r = TestRepo::new();
     r.write("a", "x");

@@ -172,8 +172,10 @@ pub(crate) fn render_status_count(state: &Option<Result<Vec<StatusEntry>, String
 pub(crate) fn render_branches(
     state: &Option<Result<Vec<BranchInfo>, String>>,
     mut res: Resource<Result<Vec<BranchInfo>, String>>,
+    current_repo: Signal<String>,
+    mut new_branch: Signal<String>,
 ) -> Element {
-    match state {
+    let list_body = match state {
         Some(Ok(branches)) if branches.is_empty() => {
             rsx! { p { class: "muted small", "No local branches." } }
         }
@@ -182,15 +184,42 @@ pub(crate) fn render_branches(
             rsx! {
                 ul { class: "branch-list",
                     for b in rows {
-                        li { key: "{b.name}", class: if b.is_head { "head" } else { "" },
-                            span { class: "marker", if b.is_head { "●" } else { "○" } }
-                            span { class: "name", "{b.name}" }
-                            span { class: "oid",
-                                {
-                                    b.oid
-                                        .as_ref()
-                                        .map(|o| o.chars().take(7).collect::<String>())
-                                        .unwrap_or_else(|| "—".to_string())
+                        {
+                            let name_for_switch = b.name.clone();
+                            let name_for_delete = b.name.clone();
+                            let is_head = b.is_head;
+                            rsx! {
+                                li { key: "{b.name}", class: if b.is_head { "head" } else { "" },
+                                    span { class: "marker", if b.is_head { "●" } else { "○" } }
+                                    span { class: "name", "{b.name}" }
+                                    span { class: "oid",
+                                        {
+                                            b.oid
+                                                .as_ref()
+                                                .map(|o| o.chars().take(7).collect::<String>())
+                                                .unwrap_or_else(|| "—".to_string())
+                                        }
+                                    }
+                                    if !is_head {
+                                        button {
+                                            class: "branch-act switch",
+                                            title: "Check out this branch",
+                                            onclick: move |evt| {
+                                                evt.stop_propagation();
+                                                checkout_branch(name_for_switch.clone(), current_repo);
+                                            },
+                                            "→"
+                                        }
+                                        button {
+                                            class: "branch-act delete",
+                                            title: "Delete this branch (refuses if unmerged)",
+                                            onclick: move |evt| {
+                                                evt.stop_propagation();
+                                                delete_branch(name_for_delete.clone(), current_repo);
+                                            },
+                                            "×"
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -208,6 +237,39 @@ pub(crate) fn render_branches(
             }
         }
         None => rsx! { p { class: "muted small", "Loading…" } },
+    };
+
+    let name_for_create = new_branch.read().clone();
+    let can_create = !name_for_create.trim().is_empty();
+    rsx! {
+        {list_body}
+        form {
+            class: "new-branch",
+            onsubmit: move |e| {
+                e.prevent_default();
+                let raw = new_branch.read().trim().to_string();
+                if raw.is_empty() {
+                    return;
+                }
+                create_branch(raw, current_repo);
+                new_branch.set(String::new());
+            },
+            input {
+                r#type: "text",
+                placeholder: "new branch name",
+                value: "{name_for_create}",
+                spellcheck: "false",
+                autocapitalize: "off",
+                autocomplete: "off",
+                oninput: move |e| new_branch.set(e.value()),
+            }
+            button {
+                r#type: "submit",
+                class: "new-branch-btn",
+                disabled: !can_create,
+                "Create"
+            }
+        }
     }
 }
 
@@ -319,6 +381,7 @@ pub(crate) fn render_status(
                         {
                             let path = e.path.clone();
                             let path_for_stage = e.path.clone();
+                            let path_for_discard = e.path.clone();
                             let path_for_class = e.path.clone();
                             let is_selected = selected_file.read().as_deref() == Some(path_for_class.as_str());
                             rsx! {
@@ -340,6 +403,15 @@ pub(crate) fn render_status(
                                         {status_glyph(&e.kind)}
                                     }
                                     span { class: "path", "{e.path}" }
+                                    button {
+                                        class: "stage-btn discard",
+                                        title: "Discard worktree changes to this file",
+                                        onclick: move |evt| {
+                                            evt.stop_propagation();
+                                            discard_one(path_for_discard.clone(), current_repo);
+                                        },
+                                        "↺"
+                                    }
                                     button {
                                         class: "stage-btn",
                                         title: "Stage this file",
@@ -444,6 +516,36 @@ fn unstage_one(file: String, current_repo: Signal<String>) {
     let path = current_repo.read().clone();
     spawn(async move {
         let _ = crate::fetch::post_unstage(&path, &[file]).await;
+    });
+}
+
+fn discard_one(file: String, current_repo: Signal<String>) {
+    let path = current_repo.read().clone();
+    spawn(async move {
+        let _ = crate::fetch::post_discard(&path, &[file]).await;
+    });
+}
+
+fn checkout_branch(name: String, current_repo: Signal<String>) {
+    let path = current_repo.read().clone();
+    spawn(async move {
+        let _ = crate::fetch::post_checkout(&path, &name).await;
+    });
+}
+
+fn delete_branch(name: String, current_repo: Signal<String>) {
+    let path = current_repo.read().clone();
+    spawn(async move {
+        let _ = crate::fetch::post_branch_delete(&path, &name).await;
+    });
+}
+
+fn create_branch(name: String, current_repo: Signal<String>) {
+    let path = current_repo.read().clone();
+    spawn(async move {
+        // Create + switch in one step — matches `git checkout -b` semantics
+        // and is the default expectation for "I made a new branch".
+        let _ = crate::fetch::post_branch_create(&path, &name, true).await;
     });
 }
 

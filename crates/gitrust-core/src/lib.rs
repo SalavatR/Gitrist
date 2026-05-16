@@ -670,6 +670,65 @@ pub fn stage_files(repo: &Path, files: &[String]) -> anyhow::Result<()> {
     run_git(repo, &args).map(|_| ())
 }
 
+/// `git restore -- <files>` — revert each path in the worktree to the
+/// version currently in the index. No-op on clean files; errors on
+/// paths that don't have an index entry (i.e. untracked files).
+pub fn discard_files(repo: &Path, files: &[String]) -> anyhow::Result<()> {
+    if files.is_empty() {
+        return Ok(());
+    }
+    let mut args = vec!["restore", "--"];
+    for f in files {
+        args.push(f.as_str());
+    }
+    run_git(repo, &args).map(|_| ())
+}
+
+/// `git checkout <target>` — `target` can be a branch name, a tag, or
+/// a commit oid. Refuses (via git) when the worktree would be
+/// clobbered by the switch; the error bubbles up so the UI can
+/// surface it.
+pub fn checkout(repo: &Path, target: &str) -> anyhow::Result<()> {
+    if target.trim().is_empty() {
+        anyhow::bail!("checkout target must not be empty");
+    }
+    run_git(repo, &["checkout", target]).map(|_| ())
+}
+
+/// Create a new branch named `name`. When `from` is `Some(rev)` the
+/// branch starts at that revision; otherwise from current HEAD. When
+/// `switch` is true, checks out the new branch in the same step
+/// (`git checkout -b`).
+pub fn create_branch(
+    repo: &Path,
+    name: &str,
+    from: Option<&str>,
+    switch: bool,
+) -> anyhow::Result<()> {
+    if name.trim().is_empty() {
+        anyhow::bail!("branch name must not be empty");
+    }
+    let mut args: Vec<&str> = if switch {
+        vec!["checkout", "-b", name]
+    } else {
+        vec!["branch", name]
+    };
+    if let Some(f) = from.filter(|s| !s.trim().is_empty()) {
+        args.push(f);
+    }
+    run_git(repo, &args).map(|_| ())
+}
+
+/// `git branch -d <name>` — safe delete; refuses to remove an
+/// unmerged branch (git enforces this, not us). The UI surfaces
+/// that error and can offer a "force delete" follow-up later.
+pub fn delete_branch(repo: &Path, name: &str) -> anyhow::Result<()> {
+    if name.trim().is_empty() {
+        anyhow::bail!("branch name must not be empty");
+    }
+    run_git(repo, &["branch", "-d", name]).map(|_| ())
+}
+
 /// `git reset HEAD -- <files>` — drop the index entries back to whatever
 /// HEAD has for these paths (or remove them entirely for new files).
 pub fn unstage_files(repo: &Path, files: &[String]) -> anyhow::Result<()> {

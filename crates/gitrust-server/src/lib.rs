@@ -16,10 +16,11 @@ use tower_http::trace::TraceLayer;
 
 use gitrust_core::{
     BlameView, BlobView, BranchInfo, CommitDiff, CommitInfo, FileDiff, RemoteBranchInfo,
-    RepoSummary, StatusEntry, TagInfo, TreeEntry, blame_file, commit as core_commit, commit_info,
-    diff_commit, diff_working, list_branches, list_remote_branches, list_staged, list_status,
-    list_tags, list_tree, log_commits, show_blob, stage_files as core_stage_files, summarize_repo,
-    unstage_files as core_unstage,
+    RepoSummary, StatusEntry, TagInfo, TreeEntry, blame_file, checkout as core_checkout,
+    commit as core_commit, commit_info, create_branch as core_create_branch,
+    delete_branch as core_delete_branch, diff_commit, diff_working, discard_files, list_branches,
+    list_remote_branches, list_staged, list_status, list_tags, list_tree, log_commits, show_blob,
+    stage_files as core_stage_files, summarize_repo, unstage_files as core_unstage,
 };
 
 #[derive(Serialize)]
@@ -195,6 +196,73 @@ async fn repo_commit(Json(body): Json<CommitBody>) -> Result<Json<serde_json::Va
 async fn repo_commit_get(Query(q): Query<DiffQuery>) -> Result<Json<CommitInfo>, ApiError> {
     let path = PathBuf::from(q.path);
     commit_info(&path, &q.oid).map(Json).map_err(ApiError::from)
+}
+
+#[derive(Deserialize)]
+struct CreateBranchBody {
+    path: String,
+    name: String,
+    #[serde(default)]
+    from: Option<String>,
+    #[serde(default)]
+    switch: bool,
+}
+
+async fn repo_branch_create(Json(body): Json<CreateBranchBody>) -> Result<StatusCode, ApiError> {
+    let CreateBranchBody {
+        path,
+        name,
+        from,
+        switch,
+    } = body;
+    let repo = PathBuf::from(path);
+    tokio::task::spawn_blocking(move || core_create_branch(&repo, &name, from.as_deref(), switch))
+        .await
+        .map_err(|e| anyhow::anyhow!("join error: {e}"))?
+        .map_err(ApiError::from)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Deserialize)]
+struct DeleteBranchBody {
+    path: String,
+    name: String,
+}
+
+async fn repo_branch_delete(Json(body): Json<DeleteBranchBody>) -> Result<StatusCode, ApiError> {
+    let DeleteBranchBody { path, name } = body;
+    let repo = PathBuf::from(path);
+    tokio::task::spawn_blocking(move || core_delete_branch(&repo, &name))
+        .await
+        .map_err(|e| anyhow::anyhow!("join error: {e}"))?
+        .map_err(ApiError::from)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Deserialize)]
+struct CheckoutBody {
+    path: String,
+    target: String,
+}
+
+async fn repo_checkout(Json(body): Json<CheckoutBody>) -> Result<StatusCode, ApiError> {
+    let CheckoutBody { path, target } = body;
+    let repo = PathBuf::from(path);
+    tokio::task::spawn_blocking(move || core_checkout(&repo, &target))
+        .await
+        .map_err(|e| anyhow::anyhow!("join error: {e}"))?
+        .map_err(ApiError::from)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn repo_discard(Json(body): Json<StageBody>) -> Result<StatusCode, ApiError> {
+    let StageBody { path, files } = body;
+    let repo = PathBuf::from(path);
+    tokio::task::spawn_blocking(move || discard_files(&repo, &files))
+        .await
+        .map_err(|e| anyhow::anyhow!("join error: {e}"))?
+        .map_err(ApiError::from)?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 /// Live filesystem-event stream for a single repo. Client opens a WebSocket
@@ -515,7 +583,11 @@ pub fn router(source: WebSource, auth: AuthState) -> Router {
         .route("/repo/events", get(repo_events))
         .route("/repo/stage", post(repo_stage))
         .route("/repo/unstage", post(repo_unstage))
+        .route("/repo/discard", post(repo_discard))
         .route("/repo/commit", get(repo_commit_get).post(repo_commit))
+        .route("/repo/branches/create", post(repo_branch_create))
+        .route("/repo/branches/delete", post(repo_branch_delete))
+        .route("/repo/checkout", post(repo_checkout))
         .route_layer(middleware::from_fn_with_state(auth.clone(), require_auth));
 
     let api = open.merge(protected).with_state(auth);

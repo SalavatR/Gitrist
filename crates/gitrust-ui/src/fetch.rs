@@ -111,6 +111,42 @@ pub(crate) async fn post_unstage(path: &str, files: &[String]) -> Result<(), Str
 }
 
 #[cfg(target_arch = "wasm32")]
+pub(crate) async fn post_discard(path: &str, files: &[String]) -> Result<(), String> {
+    post_empty(
+        "/api/repo/discard",
+        serde_json::json!({ "path": path, "files": files }),
+    )
+    .await
+}
+
+#[cfg(target_arch = "wasm32")]
+pub(crate) async fn post_checkout(path: &str, target: &str) -> Result<(), String> {
+    post_empty(
+        "/api/repo/checkout",
+        serde_json::json!({ "path": path, "target": target }),
+    )
+    .await
+}
+
+#[cfg(target_arch = "wasm32")]
+pub(crate) async fn post_branch_create(path: &str, name: &str, switch: bool) -> Result<(), String> {
+    post_empty(
+        "/api/repo/branches/create",
+        serde_json::json!({ "path": path, "name": name, "switch": switch }),
+    )
+    .await
+}
+
+#[cfg(target_arch = "wasm32")]
+pub(crate) async fn post_branch_delete(path: &str, name: &str) -> Result<(), String> {
+    post_empty(
+        "/api/repo/branches/delete",
+        serde_json::json!({ "path": path, "name": name }),
+    )
+    .await
+}
+
+#[cfg(target_arch = "wasm32")]
 pub(crate) async fn post_commit(path: &str, message: &str) -> Result<String, String> {
     let v: serde_json::Value = post_with_response(
         "/api/repo/commit",
@@ -281,5 +317,29 @@ pub(crate) async fn post_unstage(_path: &str, _files: &[String]) -> Result<(), S
 
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) async fn post_commit(_path: &str, _message: &str) -> Result<String, String> {
+    Err("native build: writes not implemented".into())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) async fn post_discard(_path: &str, _files: &[String]) -> Result<(), String> {
+    Err("native build: writes not implemented".into())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) async fn post_checkout(_path: &str, _target: &str) -> Result<(), String> {
+    Err("native build: writes not implemented".into())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) async fn post_branch_create(
+    _path: &str,
+    _name: &str,
+    _switch: bool,
+) -> Result<(), String> {
+    Err("native build: writes not implemented".into())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) async fn post_branch_delete(_path: &str, _name: &str) -> Result<(), String> {
     Err("native build: writes not implemented".into())
 }
