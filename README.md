@@ -7,24 +7,41 @@ they always see the same state.
 
 ## Status
 
-Early. Roughly v0.1 territory.
+Early but functional as a read-only client. Roughly v0.2 territory.
 
 What works today:
 
 - `gitrust serve` boots an axum server with a REST API and serves a
-  Dioxus WebAssembly UI as static files.
-- Endpoints: `/api/health`, `/api/repo/summary`, `/api/repo/log`,
-  `/api/repo/status` against any local git repo by absolute path.
-- Web shell shows repository summary, working-tree changes, and recent
-  commits. The active repo path is editable via an input at the top —
-  all three views refetch when it changes.
+  Dioxus WebAssembly UI. `gitrust app` (built with
+  `--features desktop`) opens a wry+tao window instead of relying on
+  a browser; without a display it falls back to printing the URL.
+- Reads cover: `summary`, `log`, `status`, `branches`, `tags`,
+  `remotes`, `tree`, `blob`, `diff`, `diff/working` (all under
+  `/api/repo/`). Any local repo by absolute path.
+- Web shell shows: repository summary card, history table with
+  relative time, sidebar with branches / remotes / tags / working
+  tree / files-at-HEAD blocks, a file viewer with tree-sitter
+  syntax highlighting (Rust, JSON, HTML, CSS, TS/JS, Python, TOML,
+  Lua, Markdown), per-commit diff with rename detection, working-
+  tree diff per file, switchable unified / side-by-side view, and
+  auto-collapse on large diffs.
+- Live updates via WebSocket: the server watches the worktree with
+  `notify`, pushes debounced event kinds over `/api/repo/events`,
+  and the UI restarts the affected resources without polling delay.
+- Single-binary release: `cargo build --release` bakes the WASM
+  bundle in via `include_dir!`, so `./target/release/gitrust serve`
+  is self-contained.
 
 Deferred:
 
-- Native (desktop window) shell. The dioxus-desktop / wry path needs
-  webkit2gtk + a display server, neither available in the current dev
-  environment. Worth tackling on a real desktop.
-- Diff viewer, branch ops, staging/commit, write actions.
+- Writes: stage / unstage / commit, branch ops, discard. Pending
+  an auth model (signed cookie at first launch is the current
+  sketch).
+- More reads: commit-by-oid permalinks, blame.
+- Native UX polish: menu bar items, keyboard shortcuts, pre-built
+  binaries via `cargo-dist`.
+- Markdown inline highlighting (block grammar runs; inline
+  injection chain through `tree-sitter-highlight` is a TODO).
 
 ## Quickstart
 
@@ -54,15 +71,16 @@ instructions are in [docs/build.md](docs/build.md).
 
 ## Workspace
 
-Five crates under `crates/`:
+Six crates under `crates/`:
 
-| Crate            | Role                                                          |
-| ---------------- | ------------------------------------------------------------- |
-| `gitrust-core`   | Git operations via [gix](https://crates.io/crates/gix).       |
-| `gitrust-server` | axum router serving `/api/*` and the WASM bundle.             |
-| `gitrust-ui`     | Dioxus components, target-independent.                        |
-| `gitrust-web`    | wasm32 entry binary that mounts the UI.                       |
-| `gitrust`        | main binary with `serve` (impl) and `app` (stub) subcommands. |
+| Crate            | Role                                                                                |
+| ---------------- | ----------------------------------------------------------------------------------- |
+| `gitrust-types`  | Wire-shape structs shared by server and UI. Pure serde, target-independent.         |
+| `gitrust-core`   | Git operations via [gix](https://crates.io/crates/gix); returns wire types.         |
+| `gitrust-server` | axum router serving `/api/*`, the WASM bundle, and the `/api/repo/events` WS.       |
+| `gitrust-ui`     | Dioxus components, split into `state`/`fetch`/`ws`/`sidebar`/`main_panel`/`diff`.   |
+| `gitrust-web`    | wasm32 entry binary that mounts the UI.                                             |
+| `gitrust`        | main binary with `serve` and `app` subcommands.                                     |
 
 `gitrust-web` is excluded from `default-members` because `dioxus-web`
 only links for `wasm32-unknown-unknown` — running `cargo build` from

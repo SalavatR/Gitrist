@@ -8,8 +8,9 @@ a REST API. Two UI surfaces consume that API:
 
 - A **web shell** — Dioxus components compiled to WebAssembly, served
   by the same binary, opened in any browser.
-- A **native shell** — planned. A desktop window (via dioxus-desktop
-  or wry+tao) loading the same WASM bundle from `localhost`.
+- A **native shell** — `gitrust app` (with `--features desktop`)
+  opens a wry+tao window pointing at the same in-process server,
+  with a URL-mode fallback when no display is available.
 
 Both shells talk to the same in-process server, so the source of
 truth is always the same — no client-side replicas of git state.
@@ -27,25 +28,35 @@ Each layer is allowed to depend only on layers below it.
                     └────────┬───────┘
                              │
                     ┌────────▼───────┐
-                    │ gitrust-server │   axum, REST API, ServeDir
-                    └────────┬───────┘
+                    │ gitrust-server │   axum, REST API, ServeDir,
+                    └────────┬───────┘   /api/repo/events WebSocket
                              │
                     ┌────────▼───────┐
                     │  gitrust-core  │   gix-backed git operations
-                    └────────────────┘
-
-                    ┌────────────────┐
-                    │  gitrust-web   │   wasm32 entry, dioxus::launch
                     └────────┬───────┘
                              │
                     ┌────────▼───────┐
+                    │ gitrust-types  │   wire structs (serde),
+                    └────────▲───────┘   target-independent
+                             │
+                    ┌────────┴───────┐
                     │  gitrust-ui    │   Dioxus components
+                    └────────▲───────┘
+                             │
+                    ┌────────┴───────┐
+                    │  gitrust-web   │   wasm32 entry, dioxus::launch
                     └────────────────┘
 ```
 
+`gitrust-types` sits in the middle: both the server stack
+(core → server) and the client stack (ui → web) depend on it, so a
+wire-shape change is a single edit that surfaces as a compile error
+on both sides.
+
 Note that `gitrust-server` does **not** depend on `gitrust-ui`. The
 server doesn't render anything itself; it just serves the pre-built
-WASM bundle from disk via `tower_http::services::ServeDir`. There is
+WASM bundle (from disk via `tower_http::services::ServeDir` in dev
+mode, or baked in via `include_dir!` for release builds). There is
 no SSR, no server functions.
 
 ## The wasm/native split
@@ -75,38 +86,53 @@ native default-members set.
 
 ## Types across the wire
 
-Both `gitrust-core` (server side) and `gitrust-ui` (client side)
-define mirror Rust types for the API payload — `RepoSummary`,
-`CommitInfo`, `StatusEntry`. They are intentionally duplicated rather
-than extracted into a shared crate, because a shared crate would have
-to compile for both wasm32 and native. As long as the field names
-match, `serde` deserialization keeps the wire format consistent.
+Wire shapes live in a dedicated `gitrust-types` crate: pure
+`Serialize`/`Deserialize` structs (`RepoSummary`, `CommitInfo`,
+`StatusEntry`, `FileDiff`, `BlobView`, …) with no git or browser
+deps so it compiles unchanged for both `wasm32-unknown-unknown` and
+native targets. Both `gitrust-core` and `gitrust-ui` use these
+types directly — renaming a field is a single edit and the type
+system catches every consumer on both sides.
 
-A future `gitrust-types` crate is the right move once the duplication
-grows painful — at that point the shared crate becomes a small,
-target-independent set of `Serialize`/`Deserialize` structs with no
-git deps.
+`gitrust-core` returns these types directly from its functions; the
+server passes them through `axum::Json` without conversion. The UI
+deserializes the same structs out of `gloo_net::Request::json`.
 
 ## State and data flow
 
-Data flow is one-directional: UI → fetch → server → gix → response.
-There is no write API yet, no server-side state beyond the in-flight
-request, and no caching. Each `use_resource` call in the UI triggers
-a fresh fetch.
+Read flow is one-directional: UI → `fetch` → server → `gix` →
+response. The selected repository path lives in a `dioxus::Signal`
+on the top-level `App` component; every `use_resource` reads it and
+re-runs when the value changes.
 
-The selected repository path lives in a `dioxus::Signal` in the
-top-level `App` component. Three `use_resource`s read it; each
-re-runs when the signal value changes.
+Refresh is primarily push-based. The UI opens one WebSocket per
+repo to `/api/repo/events`; the server watches the worktree via
+`notify` and pushes debounced, deduplicated event kinds
+(`head_changed`, `refs_changed`, `index_changed`,
+`worktree_changed`) which the UI dispatches to the affected
+`use_resource.restart()`s. A short 2 s / 10 s polling pair stays
+as a silent fallback for when the WebSocket can't deliver. The
+`use_resource` for the WebSocket is itself keyed on the repo path,
+so swapping repos closes the previous socket cleanly.
+
+Stale-while-revalidate is wired for the three main-panel
+resources (commit diff, working diff, blob view): mirror Signals
+hold the last successful value so clicking a new commit / file
+doesn't blank the panel while the new fetch lands.
+
+There is no write API yet and no server-side state beyond the
+in-flight requests and active fs-watchers.
 
 ## Where things will grow
 
 - **Write actions** (commit, branch create, checkout). These need
-  authentication of some flavor — even single-user, self-hosted, the
-  binary should not expose write actions to whoever can `curl
-  localhost`. A signed cookie set on first launch is enough.
-- **Multiple repos at once**. Currently the path is a query param on
-  every request. A future `gitrust serve --root /path/to/repos` could
-  let the UI list workspaces by name rather than path.
-- **Per-repo background refresh**. Right now the UI refetches on
-  Signal changes only. Eventually a WebSocket push from the server
-  on filesystem events would be cheaper than poll.
+  authentication of some flavor — even single-user, self-hosted,
+  the binary should not expose write actions to whoever can `curl
+  localhost`. A signed cookie set on first launch is the current
+  sketch.
+- **Multiple repos at once**. Currently the path is a query param
+  on every request. A future `gitrust serve --root /path/to/repos`
+  could let the UI list workspaces by name rather than path.
+- **Pre-built binaries** via `cargo-dist` so users don't have to
+  install `webkit2gtk-4.1` system packages just to try the
+  desktop feature.

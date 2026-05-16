@@ -362,3 +362,47 @@ curl 'http://127.0.0.1:3737/api/repo/diff/working?path=/home/me/myrepo&file=src/
 
 Same hunk shape (context lines, line-number gutter, binary
 detection) as the commit diff.
+
+## `GET /api/repo/events?path=<path>` (WebSocket)
+
+Live filesystem-event stream for one repo. Clients send the standard
+HTTP/1.1 Upgrade headers (`Upgrade: websocket`, `Sec-WebSocket-Key`,
+etc.); the server responds with 101 Switching Protocols and from
+that point pushes JSON text frames whenever the worktree changes.
+
+```sh
+# In Python (stdlib only, raw frames):
+python3 -c '
+import websockets.sync.client as ws
+with ws.connect("ws://127.0.0.1:3737/api/repo/events?path=/home/me/myrepo") as s:
+    for msg in s:
+        print(msg)
+'
+```
+
+```json
+{ "kind": "worktree_changed" }
+```
+
+`kind` is one of:
+
+- `head_changed` — `.git/HEAD` was written (e.g. `git checkout`).
+- `refs_changed` — a ref under `.git/refs/` (or `.git/packed-refs`)
+  was written (commit on the current branch, tag create, fetch).
+- `index_changed` — `.git/index` was written (`git add`, `reset`).
+- `worktree_changed` — a file outside `.git/` was modified, created
+  or removed.
+
+Frames are debounced server-side (150 ms window, deduplicated by
+kind) so a single high-level operation like `git commit` produces
+at most one frame per kind rather than the dozen raw inotify
+events underneath. Noisy paths are filtered out before
+classification: `.git/objects/`, `.git/lfs/`, and any `*.lock`.
+
+The watcher walks the worktree at connection time and adds a
+per-directory `NonRecursive` watch, skipping `target/`,
+`node_modules/`, `.direnv/`, `.venv/` so it doesn't blow past
+`max_user_watches` on real-world repos. New directories created
+after connection aren't watched until the client reconnects;
+clients should treat the WebSocket as best-effort and keep a
+short polling fallback for missed events.
