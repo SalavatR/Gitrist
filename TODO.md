@@ -152,7 +152,15 @@ within each section.
       on ubuntu / macos / windows. Linux desktop job installs
       webkit2gtk-4.1 + libsoup-3.0.
 - [ ] Native menu bar items (File → Open Repo, View → Reload, etc.).
-- [ ] System keyboard shortcuts (Cmd-W to close on macOS, etc.).
+      Needs a `muda` integration — tao 0.30+ moved menus to the
+      separate crate and wiring it in on three platforms is its
+      own chunk of work. Tracked separately from the keyboard
+      shortcuts below.
+- [x] System keyboard shortcuts handled inside `gitrust app`'s
+      event loop: Cmd-R / Ctrl-R reloads the webview, Cmd-Q /
+      Ctrl-Q and Cmd-W / Ctrl-W exit. Modifier key follows the
+      `cfg!(target_os = "macos")` convention so the shortcuts
+      feel right per platform.
 - [x] Pre-built release binaries via a dedicated GitHub Actions
       release workflow. Push `vX.Y.Z` and the matrix builds
       `gitrust --features desktop` for `aarch64-apple-darwin`,

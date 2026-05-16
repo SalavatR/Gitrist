@@ -151,8 +151,9 @@ fn desktop_supported() -> bool {
 
 #[cfg(feature = "desktop")]
 fn open_window(url: &str) -> Result<()> {
-    use tao::event::{Event, WindowEvent};
+    use tao::event::{ElementState, Event, WindowEvent};
     use tao::event_loop::{ControlFlow, EventLoop};
+    use tao::keyboard::{Key, ModifiersState};
     use tao::window::WindowBuilder;
     use wry::WebViewBuilder;
 
@@ -161,15 +162,51 @@ fn open_window(url: &str) -> Result<()> {
         .with_title("gitrust")
         .with_inner_size(tao::dpi::LogicalSize::new(1280.0, 800.0))
         .build(&event_loop)?;
-    let _webview = WebViewBuilder::new().with_url(url).build(&window)?;
+    let webview = WebViewBuilder::new().with_url(url).build(&window)?;
+
+    let mut modifiers = ModifiersState::empty();
     event_loop.run(move |event, _, control_flow| {
         *control_flow = ControlFlow::Wait;
-        if let Event::WindowEvent {
-            event: WindowEvent::CloseRequested,
-            ..
-        } = event
-        {
-            *control_flow = ControlFlow::Exit;
+        match event {
+            Event::WindowEvent {
+                event: WindowEvent::CloseRequested,
+                ..
+            } => {
+                *control_flow = ControlFlow::Exit;
+            }
+            Event::WindowEvent {
+                event: WindowEvent::ModifiersChanged(new_mods),
+                ..
+            } => {
+                modifiers = new_mods;
+            }
+            Event::WindowEvent {
+                event: WindowEvent::KeyboardInput { event: ev, .. },
+                ..
+            } if ev.state == ElementState::Pressed => {
+                // Primary modifier: Cmd on macOS, Ctrl elsewhere — matches
+                // how Quit / Reload / Close shortcuts feel native on each OS.
+                let primary = if cfg!(target_os = "macos") {
+                    modifiers.super_key()
+                } else {
+                    modifiers.control_key()
+                };
+                if !primary {
+                    return;
+                }
+                if let Key::Character(s) = &ev.logical_key {
+                    match s.to_ascii_lowercase().as_str() {
+                        "r" => {
+                            let _ = webview.load_url(url);
+                        }
+                        "q" | "w" => {
+                            *control_flow = ControlFlow::Exit;
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            _ => {}
         }
     });
 }
