@@ -151,11 +151,13 @@ within each section.
 - [x] CI matrix building default + `desktop`-feature configurations
       on ubuntu / macos / windows. Linux desktop job installs
       webkit2gtk-4.1 + libsoup-3.0.
-- [ ] Native menu bar items (File → Open Repo, View → Reload, etc.).
-      Needs a `muda` integration — tao 0.30+ moved menus to the
-      separate crate and wiring it in on three platforms is its
-      own chunk of work. Tracked separately from the keyboard
-      shortcuts below.
+- [x] Native menu bar via `muda`: File → Quit (Cmd-Q / Ctrl-Q)
+      and View → Reload (Cmd-R / Ctrl-R). Platform glue: macOS
+      `init_for_nsapp`, Linux `init_for_gtk_window` against
+      tao's `WindowExtUnix::gtk_window()`, Windows
+      `init_for_hwnd`. Errors during init are non-fatal — the
+      keyboard handler below still serves as fallback. File →
+      Open Repo and a full About item are still pending.
 - [x] System keyboard shortcuts handled inside `gitrust app`'s
       event loop: Cmd-R / Ctrl-R reloads the webview, Cmd-Q /
       Ctrl-Q and Cmd-W / Ctrl-W exit. Modifier key follows the

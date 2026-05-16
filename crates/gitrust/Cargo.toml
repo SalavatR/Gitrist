@@ -18,11 +18,15 @@ anyhow = { workspace = true }
 include_dir = { workspace = true }
 tao = { version = "0.35", optional = true }
 wry = { version = "0.55", optional = true }
+muda = { version = "0.18", optional = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+gtk = { version = "0.18", optional = true }
 
 [features]
 default = []
-# Enable a native desktop window via wry (webview) + tao (event loop).
-# Pulls in system deps (webkit2gtk + libsoup on Linux, WebView2 on Windows,
-# WKWebView on macOS — built-in). Off by default so headless / dev builds
-# work without those libs.
-desktop = ["dep:tao", "dep:wry"]
+# Enable a native desktop window via wry (webview) + tao (event loop) +
+# muda (cross-platform menu bar). Pulls in system deps (webkit2gtk +
+# libsoup on Linux, WebView2 on Windows, WKWebView on macOS — built-in).
+# Off by default so headless / dev builds work without those libs.
+desktop = ["dep:tao", "dep:wry", "dep:muda", "dep:gtk"]

@@ -151,6 +151,8 @@ fn desktop_supported() -> bool {
 
 #[cfg(feature = "desktop")]
 fn open_window(url: &str) -> Result<()> {
+    use muda::accelerator::{Accelerator, Code, Modifiers};
+    use muda::{Menu, MenuEvent, MenuItem, Submenu};
     use tao::event::{ElementState, Event, WindowEvent};
     use tao::event_loop::{ControlFlow, EventLoop};
     use tao::keyboard::{Key, ModifiersState};
@@ -162,11 +164,73 @@ fn open_window(url: &str) -> Result<()> {
         .with_title("gitrust")
         .with_inner_size(tao::dpi::LogicalSize::new(1280.0, 800.0))
         .build(&event_loop)?;
+
+    // Cmd on macOS, Ctrl on Linux / Windows — feels native per platform.
+    let primary = if cfg!(target_os = "macos") {
+        Modifiers::SUPER
+    } else {
+        Modifiers::CONTROL
+    };
+
+    let menu = Menu::new();
+    let file_menu = Submenu::new("File", true);
+    let quit_item = MenuItem::new(
+        "Quit",
+        true,
+        Some(Accelerator::new(Some(primary), Code::KeyQ)),
+    );
+    file_menu.append(&quit_item).ok();
+    let view_menu = Submenu::new("View", true);
+    let reload_item = MenuItem::new(
+        "Reload",
+        true,
+        Some(Accelerator::new(Some(primary), Code::KeyR)),
+    );
+    view_menu.append(&reload_item).ok();
+    menu.append(&file_menu).ok();
+    menu.append(&view_menu).ok();
+
+    // Platform glue. Errors are non-fatal — the keyboard handler below
+    // still provides Cmd-Q / Cmd-R fallbacks if the menu fails to attach.
+    #[cfg(target_os = "macos")]
+    {
+        menu.init_for_nsapp();
+    }
+    #[cfg(target_os = "linux")]
+    {
+        use tao::platform::unix::WindowExtUnix;
+        let gtk_window = window.gtk_window();
+        let _ = menu.init_for_gtk_window(gtk_window, None::<&gtk::Box>);
+    }
+    #[cfg(target_os = "windows")]
+    {
+        use tao::platform::windows::WindowExtWindows;
+        let _ = unsafe { menu.init_for_hwnd(window.hwnd() as _) };
+    }
+
     let webview = WebViewBuilder::new().with_url(url).build(&window)?;
 
+    let menu_channel = MenuEvent::receiver();
+    let quit_id = quit_item.id().clone();
+    let reload_id = reload_item.id().clone();
     let mut modifiers = ModifiersState::empty();
+
     event_loop.run(move |event, _, control_flow| {
         *control_flow = ControlFlow::Wait;
+
+        // Menu accelerators arrive here; the OS routed Cmd-Q / Cmd-R
+        // through the menu bar rather than the webview.
+        if let Ok(menu_event) = menu_channel.try_recv() {
+            if menu_event.id == quit_id {
+                *control_flow = ControlFlow::Exit;
+                return;
+            }
+            if menu_event.id == reload_id {
+                let _ = webview.load_url(url);
+                return;
+            }
+        }
+
         match event {
             Event::WindowEvent {
                 event: WindowEvent::CloseRequested,
@@ -180,18 +244,19 @@ fn open_window(url: &str) -> Result<()> {
             } => {
                 modifiers = new_mods;
             }
+            // Belt-and-suspenders: if the menu bar failed to attach on
+            // this platform, the raw key event still triggers the same
+            // action.
             Event::WindowEvent {
                 event: WindowEvent::KeyboardInput { event: ev, .. },
                 ..
             } if ev.state == ElementState::Pressed => {
-                // Primary modifier: Cmd on macOS, Ctrl elsewhere — matches
-                // how Quit / Reload / Close shortcuts feel native on each OS.
-                let primary = if cfg!(target_os = "macos") {
+                let primary_pressed = if cfg!(target_os = "macos") {
                     modifiers.super_key()
                 } else {
                     modifiers.control_key()
                 };
-                if !primary {
+                if !primary_pressed {
                     return;
                 }
                 if let Key::Character(s) = &ev.logical_key {
