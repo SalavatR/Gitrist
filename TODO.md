@@ -128,8 +128,14 @@ within each section.
 - [ ] Structured error envelope: `{ error, code, hint? }` instead of
       a free-form message.
 - [ ] CI: cargo check (native + wasm32), `fmt --check`, `clippy -D warnings`.
-- [ ] Tests: integration tests for API (spawn server, hit it). UI
-      snapshot tests if Dioxus exposes a story for that.
+- [x] Tests: `gitrust-core` has integration tests for every read-API
+      function (10 tests, fresh repo per case via tempdir + `git`
+      CLI). `gitrust-server` adds 7 HTTP tests through `reqwest`
+      against a spawned axum server on an ephemeral port, plus a
+      WebSocket test that opens `/api/repo/events`, touches a
+      worktree file, and asserts a `worktree_changed` frame
+      arrives within the debounce window. UI snapshot tests not
+      yet (no Dioxus story support that I've found).
 
 ## Cleanup / nice-to-have
 
