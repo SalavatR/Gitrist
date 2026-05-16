@@ -477,6 +477,54 @@ async fn checkout_switches_head() {
 }
 
 #[tokio::test]
+async fn stash_save_list_pop_round_trip() {
+    let (server, r) = setup_with_initial_commit().await;
+    r.write("a.txt", "v2\n");
+
+    // Save
+    let (status, _) = post_json(
+        &server,
+        "/api/repo/stashes/save",
+        Some("test-token"),
+        serde_json::json!({
+            "path": r.path().to_str().unwrap(),
+            "message": "WIP",
+        }),
+    )
+    .await;
+    assert_eq!(status, 204);
+
+    // List
+    let (status, body) = get_json(
+        &server,
+        "/api/repo/stashes",
+        &[("path", r.path().to_str().unwrap())],
+    )
+    .await;
+    assert_eq!(status, 200);
+    let arr = body.as_array().expect("array");
+    assert_eq!(arr.len(), 1);
+    assert_eq!(arr[0]["index"], 0);
+    assert_eq!(arr[0]["ref_name"], "stash@{0}");
+    assert!(arr[0]["message"].as_str().unwrap_or("").contains("WIP"));
+
+    // Pop
+    let (status, _) = post_json(
+        &server,
+        "/api/repo/stashes/pop",
+        Some("test-token"),
+        serde_json::json!({
+            "path": r.path().to_str().unwrap(),
+            "index": 0,
+        }),
+    )
+    .await;
+    assert_eq!(status, 204);
+    let on_disk = std::fs::read_to_string(r.path().join("a.txt")).unwrap();
+    assert_eq!(on_disk, "v2\n");
+}
+
+#[tokio::test]
 async fn discard_reverts_worktree_change() {
     let (server, r) = setup_with_initial_commit().await;
     r.write("a.txt", "changed\n");

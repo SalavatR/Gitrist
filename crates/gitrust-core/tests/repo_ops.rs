@@ -520,6 +520,55 @@ fn markdown_inline_emphasis_gets_classed_via_merge() {
 }
 
 #[test]
+fn stash_save_list_pop_round_trip() {
+    let r = TestRepo::new();
+    r.write("a.txt", "v1\n");
+    r.git(&["add", "a.txt"]);
+    r.git(&["commit", "-q", "-m", "init"]);
+    // Make a worktree change so there's something to stash.
+    r.write("a.txt", "v2\n");
+
+    gitrust_core::stash_save(r.path(), Some("WIP test")).expect("save");
+
+    // Listed and message preserved.
+    let stashes = gitrust_core::stash_list(r.path()).expect("list");
+    assert_eq!(stashes.len(), 1);
+    assert_eq!(stashes[0].index, 0);
+    assert_eq!(stashes[0].ref_name, "stash@{0}");
+    assert!(stashes[0].message.contains("WIP test"));
+    assert!(stashes[0].time_unix > 0);
+
+    // Worktree was reverted by the stash push.
+    let on_disk = std::fs::read_to_string(r.path().join("a.txt")).unwrap();
+    assert_eq!(on_disk, "v1\n");
+
+    // Pop restores the worktree change and removes the stash.
+    gitrust_core::stash_pop(r.path(), 0).expect("pop");
+    let on_disk_after = std::fs::read_to_string(r.path().join("a.txt")).unwrap();
+    assert_eq!(on_disk_after, "v2\n");
+    let stashes_after = gitrust_core::stash_list(r.path()).expect("list");
+    assert!(stashes_after.is_empty());
+}
+
+#[test]
+fn stash_drop_discards_without_applying() {
+    let r = TestRepo::new();
+    r.write("a.txt", "v1\n");
+    r.git(&["add", "a.txt"]);
+    r.git(&["commit", "-q", "-m", "init"]);
+    r.write("a.txt", "v2\n");
+    gitrust_core::stash_save(r.path(), None).expect("save");
+
+    gitrust_core::stash_drop(r.path(), 0).expect("drop");
+
+    let stashes = gitrust_core::stash_list(r.path()).expect("list");
+    assert!(stashes.is_empty());
+    // Worktree is still on v1 — drop doesn't apply.
+    let on_disk = std::fs::read_to_string(r.path().join("a.txt")).unwrap();
+    assert_eq!(on_disk, "v1\n");
+}
+
+#[test]
 fn discard_reverts_worktree_to_index() {
     let r = TestRepo::new();
     r.write("a.txt", "v1\n");

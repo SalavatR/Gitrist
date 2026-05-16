@@ -9,7 +9,8 @@
 
 use dioxus::prelude::*;
 use gitrust_types::{
-    BranchInfo, CommitInfo, RemoteBranchInfo, RepoSummary, StatusEntry, TagInfo, TreeEntry,
+    BranchInfo, CommitInfo, RemoteBranchInfo, RepoSummary, StashEntry, StatusEntry, TagInfo,
+    TreeEntry,
 };
 
 use crate::time_fmt::sleep_ms;
@@ -24,6 +25,7 @@ pub(crate) struct LiveResources {
     pub tags: Resource<Result<Vec<TagInfo>, String>>,
     pub remotes: Resource<Result<Vec<RemoteBranchInfo>, String>>,
     pub tree: Resource<Result<Vec<TreeEntry>, String>>,
+    pub stashes: Resource<Result<Vec<StashEntry>, String>>,
 }
 
 impl LiveResources {
@@ -38,6 +40,7 @@ impl LiveResources {
                 self.tags.restart();
                 self.remotes.restart();
                 self.tree.restart();
+                self.stashes.restart();
             }
             "refs_changed" => {
                 self.summary.restart();
@@ -46,6 +49,9 @@ impl LiveResources {
                 self.tags.restart();
                 self.remotes.restart();
                 self.tree.restart();
+                // stash save/pop/drop writes to .git/refs/stash, so
+                // refs_changed is our cue to refresh the stash list too.
+                self.stashes.restart();
             }
             "index_changed" => {
                 self.status.restart();

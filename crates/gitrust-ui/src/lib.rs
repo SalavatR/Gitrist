@@ -16,13 +16,14 @@ mod ws;
 
 use fetch::{
     fetch_blame, fetch_blob, fetch_branches, fetch_diff, fetch_diff_working, fetch_log,
-    fetch_remotes, fetch_staged, fetch_status, fetch_summary, fetch_tags, fetch_tree,
+    fetch_remotes, fetch_staged, fetch_stashes, fetch_status, fetch_summary, fetch_tags,
+    fetch_tree,
 };
 use main_panel::{render_commit_form, render_detail, render_log, render_summary_card};
 use sidebar::{
     render_branch_count, render_branches, render_remote_count, render_remotes, render_staged,
-    render_staged_count, render_status, render_status_count, render_tag_count, render_tags,
-    render_tree, render_tree_count,
+    render_staged_count, render_stash_count, render_stashes, render_status, render_status_count,
+    render_tag_count, render_tags, render_tree, render_tree_count,
 };
 use state::{
     AUTH_TOKEN, BlobSelection, LOG_LIMIT, REFS_POLL_INTERVAL_MS, STATUS_POLL_INTERVAL_MS,
@@ -149,6 +150,10 @@ fn AppContent() -> Element {
         let path = current_repo.read().clone();
         async move { fetch_tree(&path).await }
     });
+    let stashes = use_resource(move || {
+        let path = current_repo.read().clone();
+        async move { fetch_stashes(&path).await }
+    });
 
     // Polling stays as a silent fallback — WS push is the primary path.
     use_future(move || async move {
@@ -178,6 +183,7 @@ fn AppContent() -> Element {
             tags,
             remotes,
             tree,
+            stashes,
         };
         let _ws_lifecycle = use_resource(move || {
             let path = current_repo.read().clone();
@@ -364,6 +370,13 @@ fn AppContent() -> Element {
                             {render_tag_count(&tags.read_unchecked())}
                         }
                         {render_tags(&tags.read_unchecked(), tags)}
+                    }
+                    section { class: "side-block",
+                        div { class: "side-title",
+                            span { "Stashes" }
+                            {render_stash_count(&stashes.read_unchecked())}
+                        }
+                        {render_stashes(&stashes.read_unchecked(), stashes, current_repo)}
                     }
                     section { class: "side-block",
                         div { class: "side-title",

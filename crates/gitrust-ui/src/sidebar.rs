@@ -3,9 +3,10 @@
 //! `Files at HEAD` tree.
 
 use dioxus::prelude::*;
-use gitrust_types::{BranchInfo, RemoteBranchInfo, StatusEntry, TagInfo, TreeEntry};
+use gitrust_types::{BranchInfo, RemoteBranchInfo, StashEntry, StatusEntry, TagInfo, TreeEntry};
 
 use crate::state::BlobSelection;
+use crate::time_fmt::format_time_relative;
 
 pub(crate) fn render_branch_count(state: &Option<Result<Vec<BranchInfo>, String>>) -> Element {
     if let Some(Ok(bs)) = state {
@@ -615,6 +616,117 @@ fn browser_prompt(msg: &str, default: &str) -> Option<String> {
 #[cfg(not(target_arch = "wasm32"))]
 fn browser_prompt(_msg: &str, _default: &str) -> Option<String> {
     None
+}
+
+pub(crate) fn render_stash_count(state: &Option<Result<Vec<StashEntry>, String>>) -> Element {
+    if let Some(Ok(s)) = state {
+        let n = s.len();
+        if n == 0 {
+            rsx! {}
+        } else {
+            rsx! { span { class: "count", "{n}" } }
+        }
+    } else {
+        rsx! {}
+    }
+}
+
+pub(crate) fn render_stashes(
+    state: &Option<Result<Vec<StashEntry>, String>>,
+    mut res: Resource<Result<Vec<StashEntry>, String>>,
+    current_repo: Signal<String>,
+) -> Element {
+    let body = match state {
+        Some(Ok(stashes)) if stashes.is_empty() => {
+            rsx! { p { class: "muted small", "No stashes." } }
+        }
+        Some(Ok(stashes)) => {
+            let rows = stashes.clone();
+            rsx! {
+                ul { class: "stash-list",
+                    for s in rows {
+                        {
+                            let idx = s.index;
+                            let when = format_time_relative(s.time_unix);
+                            let msg = s.message.clone();
+                            let ref_for_title = s.ref_name.clone();
+                            rsx! {
+                                li { key: "{s.ref_name}",
+                                    title: "{ref_for_title}",
+                                    span { class: "name", "{msg}" }
+                                    span { class: "when", "{when}" }
+                                    button {
+                                        class: "stash-act pop",
+                                        title: "Pop — apply and drop this stash",
+                                        onclick: move |evt| {
+                                            evt.stop_propagation();
+                                            pop_stash(idx, current_repo);
+                                        },
+                                        "↩"
+                                    }
+                                    button {
+                                        class: "stash-act drop",
+                                        title: "Drop — discard without applying",
+                                        onclick: move |evt| {
+                                            evt.stop_propagation();
+                                            drop_stash(idx, current_repo);
+                                        },
+                                        "×"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Some(Err(e)) => {
+            let msg = e.clone();
+            rsx! {
+                p { class: "err small",
+                    "Error: {msg} "
+                    button { class: "retry-btn", onclick: move |_| res.restart(), "Retry" }
+                }
+            }
+        }
+        None => rsx! { p { class: "muted small", "Loading…" } },
+    };
+    rsx! {
+        {body}
+        button {
+            class: "stash-save",
+            title: "Save the current worktree as a new stash",
+            onclick: move |_| save_stash(current_repo),
+            "Stash worktree"
+        }
+    }
+}
+
+fn save_stash(current_repo: Signal<String>) {
+    let path = current_repo.read().clone();
+    // Pre-fill empty so the user gets a clean prompt; an empty submit
+    // falls through to `git stash push` without -m.
+    let message = browser_prompt("Stash message (optional):", "");
+    spawn(async move {
+        let _ = crate::fetch::post_stash_save(&path, message.as_deref()).await;
+    });
+}
+
+fn pop_stash(index: usize, current_repo: Signal<String>) {
+    let path = current_repo.read().clone();
+    spawn(async move {
+        let _ = crate::fetch::post_stash_pop(&path, index).await;
+    });
+}
+
+fn drop_stash(index: usize, current_repo: Signal<String>) {
+    if !browser_confirm("Drop this stash? It can't be undone.") {
+        return;
+    }
+    let path = current_repo.read().clone();
+    spawn(async move {
+        let _ = crate::fetch::post_stash_drop(&path, index).await;
+    });
 }
 
 /// Render the path cell for a status entry. Renames and copies get an

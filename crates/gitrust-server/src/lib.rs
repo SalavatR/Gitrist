@@ -16,12 +16,14 @@ use tower_http::trace::TraceLayer;
 
 use gitrust_core::{
     BlameView, BlobView, BranchInfo, CommitDiff, CommitInfo, FileDiff, RemoteBranchInfo,
-    RepoSummary, StatusEntry, TagInfo, TreeEntry, blame_file, checkout as core_checkout,
-    commit as core_commit, commit_info, create_branch as core_create_branch,
-    delete_branch as core_delete_branch, diff_commit, diff_working, discard_files, list_branches,
-    list_remote_branches, list_staged, list_status, list_tags, list_tree, log_commits,
-    rename_branch as core_rename_branch, show_blob, stage_files as core_stage_files,
-    summarize_repo, unstage_files as core_unstage,
+    RepoSummary, StashEntry, StatusEntry, TagInfo, TreeEntry, blame_file,
+    checkout as core_checkout, commit as core_commit, commit_info,
+    create_branch as core_create_branch, delete_branch as core_delete_branch, diff_commit,
+    diff_working, discard_files, list_branches, list_remote_branches, list_staged, list_status,
+    list_tags, list_tree, log_commits, rename_branch as core_rename_branch, show_blob,
+    stage_files as core_stage_files, stash_drop as core_stash_drop, stash_list as core_stash_list,
+    stash_pop as core_stash_pop, stash_save as core_stash_save, summarize_repo,
+    unstage_files as core_unstage,
 };
 
 #[derive(Serialize)]
@@ -279,6 +281,54 @@ async fn repo_discard(Json(body): Json<StageBody>) -> Result<StatusCode, ApiErro
     let StageBody { path, files } = body;
     let repo = PathBuf::from(path);
     tokio::task::spawn_blocking(move || discard_files(&repo, &files))
+        .await
+        .map_err(|e| anyhow::anyhow!("join error: {e}"))?
+        .map_err(ApiError::from)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn repo_stash_list(Query(q): Query<PathQuery>) -> Result<Json<Vec<StashEntry>>, ApiError> {
+    let path = PathBuf::from(q.path);
+    core_stash_list(&path).map(Json).map_err(ApiError::from)
+}
+
+#[derive(Deserialize)]
+struct StashSaveBody {
+    path: String,
+    #[serde(default)]
+    message: Option<String>,
+}
+
+async fn repo_stash_save(Json(body): Json<StashSaveBody>) -> Result<StatusCode, ApiError> {
+    let StashSaveBody { path, message } = body;
+    let repo = PathBuf::from(path);
+    tokio::task::spawn_blocking(move || core_stash_save(&repo, message.as_deref()))
+        .await
+        .map_err(|e| anyhow::anyhow!("join error: {e}"))?
+        .map_err(ApiError::from)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Deserialize)]
+struct StashIndexBody {
+    path: String,
+    index: usize,
+}
+
+async fn repo_stash_pop(Json(body): Json<StashIndexBody>) -> Result<StatusCode, ApiError> {
+    let StashIndexBody { path, index } = body;
+    let repo = PathBuf::from(path);
+    tokio::task::spawn_blocking(move || core_stash_pop(&repo, index))
+        .await
+        .map_err(|e| anyhow::anyhow!("join error: {e}"))?
+        .map_err(ApiError::from)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn repo_stash_drop(Json(body): Json<StashIndexBody>) -> Result<StatusCode, ApiError> {
+    let StashIndexBody { path, index } = body;
+    let repo = PathBuf::from(path);
+    tokio::task::spawn_blocking(move || core_stash_drop(&repo, index))
         .await
         .map_err(|e| anyhow::anyhow!("join error: {e}"))?
         .map_err(ApiError::from)?;
@@ -714,6 +764,10 @@ pub fn router(source: WebSource, auth: AuthState) -> Router {
         .route("/repo/stage", post(repo_stage))
         .route("/repo/unstage", post(repo_unstage))
         .route("/repo/discard", post(repo_discard))
+        .route("/repo/stashes", get(repo_stash_list))
+        .route("/repo/stashes/save", post(repo_stash_save))
+        .route("/repo/stashes/pop", post(repo_stash_pop))
+        .route("/repo/stashes/drop", post(repo_stash_drop))
         .route("/repo/commit", get(repo_commit_get).post(repo_commit))
         .route("/repo/branches/create", post(repo_branch_create))
         .route("/repo/branches/delete", post(repo_branch_delete))

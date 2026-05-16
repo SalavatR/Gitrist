@@ -1022,6 +1022,75 @@ details.file-diff[open] .disclosure::before { content: "▾"; }
   cursor: not-allowed;
 }
 
+/* Stash list */
+.stash-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+.stash-list li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto auto;
+  gap: 0.4rem;
+  align-items: center;
+  padding: 0.25rem 0.2rem;
+  font-size: 0.82rem;
+  border-radius: var(--radius);
+}
+.stash-list li:hover { background: var(--surface-2); }
+.stash-list li .name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.stash-list li .when {
+  color: var(--muted);
+  font-size: 0.74rem;
+  font-variant-numeric: tabular-nums;
+}
+.stash-act {
+  padding: 0 0.4rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  color: var(--text-2);
+  cursor: pointer;
+  font-size: 0.85rem;
+  line-height: 1.2rem;
+  font-weight: 600;
+  visibility: hidden;
+}
+.stash-list li:hover .stash-act { visibility: visible; }
+.stash-act.pop:hover {
+  background: var(--accent-bg);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.stash-act.drop:hover {
+  background: var(--del-bg);
+  border-color: var(--del);
+  color: var(--del);
+}
+.stash-save {
+  width: 100%;
+  margin-top: 0.45rem;
+  padding: 0.35rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  color: var(--text-2);
+  cursor: pointer;
+  font-size: 0.82rem;
+  font-weight: 500;
+}
+.stash-save:hover {
+  background: var(--accent-bg);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
 /* Commit form between the summary card and history. */
 .commit-form {
   background: var(--surface);

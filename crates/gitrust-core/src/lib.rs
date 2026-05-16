@@ -7,7 +7,8 @@ use gix::diff::blob::{Algorithm, InternedInput, Token as IDToken};
 
 pub use gitrust_types::{
     BlameLine, BlameView, BlobLine, BlobView, BranchInfo, CommitDiff, CommitInfo, DiffHunk,
-    DiffLine, FileDiff, RemoteBranchInfo, RepoSummary, StatusEntry, TagInfo, Token, TreeEntry,
+    DiffLine, FileDiff, RemoteBranchInfo, RepoSummary, StashEntry, StatusEntry, TagInfo, Token,
+    TreeEntry,
 };
 
 fn build_commit_info(repo: &gix::Repository, oid: gix::ObjectId) -> anyhow::Result<CommitInfo> {
@@ -766,6 +767,64 @@ pub fn rename_branch(repo: &Path, old: &str, new: &str) -> anyhow::Result<()> {
         return Ok(());
     }
     run_git(repo, &["branch", "-m", old, new]).map(|_| ())
+}
+
+/// List entries in the stash. Newest first, matching `git stash list`'s
+/// own ordering (`stash@{0}` is the most recent push).
+pub fn stash_list(path: &Path) -> anyhow::Result<Vec<StashEntry>> {
+    let out = run_git(path, &["stash", "list", "--format=%gd|%s|%ct"])?;
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let mut entries = Vec::new();
+    for line in stdout.lines() {
+        let mut parts = line.splitn(3, '|');
+        let ref_name = parts.next().unwrap_or("").to_string();
+        let message = parts.next().unwrap_or("").to_string();
+        let time_unix: i64 = parts.next().and_then(|s| s.parse().ok()).unwrap_or(0);
+        if ref_name.is_empty() {
+            continue;
+        }
+        let index = parse_stash_index(&ref_name).unwrap_or(0);
+        entries.push(StashEntry {
+            index,
+            ref_name,
+            message,
+            time_unix,
+        });
+    }
+    Ok(entries)
+}
+
+fn parse_stash_index(ref_name: &str) -> Option<usize> {
+    ref_name
+        .strip_prefix("stash@{")
+        .and_then(|s| s.strip_suffix('}'))
+        .and_then(|s| s.parse().ok())
+}
+
+/// `git stash push -m <message>` (or just `git stash push` when
+/// `message` is `None` / empty). Returns even when the worktree was
+/// clean and nothing was stashed — the caller can re-list to confirm.
+pub fn stash_save(repo: &Path, message: Option<&str>) -> anyhow::Result<()> {
+    let mut args: Vec<&str> = vec!["stash", "push"];
+    if let Some(m) = message.filter(|s| !s.trim().is_empty()) {
+        args.push("-m");
+        args.push(m);
+    }
+    run_git(repo, &args).map(|_| ())
+}
+
+/// `git stash pop stash@{index}` — apply and remove the stash. Fails
+/// when the apply hits a conflict; the stash stays in the list and the
+/// worktree is partially merged.
+pub fn stash_pop(repo: &Path, index: usize) -> anyhow::Result<()> {
+    let r = format!("stash@{{{index}}}");
+    run_git(repo, &["stash", "pop", &r]).map(|_| ())
+}
+
+/// `git stash drop stash@{index}` — discard the stash without applying.
+pub fn stash_drop(repo: &Path, index: usize) -> anyhow::Result<()> {
+    let r = format!("stash@{{{index}}}");
+    run_git(repo, &["stash", "drop", &r]).map(|_| ())
 }
 
 /// `git reset HEAD -- <files>` — drop the index entries back to whatever

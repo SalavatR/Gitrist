@@ -600,6 +600,56 @@ exists.
 commit oid (detached HEAD). Refuses when local changes would be
 overwritten.
 
+### `GET /api/repo/stashes?path=<path>`
+
+Returns the stash list, newest first (matches `git stash list`'s
+own ordering).
+
+```sh
+curl 'http://127.0.0.1:3737/api/repo/stashes?path=/home/me/myrepo' \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+```json
+[
+  {
+    "index": 0,
+    "ref_name": "stash@{0}",
+    "message": "WIP on master: 85ea4437 feat: bootstrap workspace",
+    "time_unix": 1778270159
+  }
+]
+```
+
+### `POST /api/repo/stashes/save`
+
+```json
+{ "path": "...", "message": "WIP debug" }
+```
+
+`message` is optional — when omitted, `git stash push` uses its
+default `WIP on <branch>: <oid> <summary>` line. Returns
+`204 No Content`; the response carries no oid since the caller
+can re-list to find the new entry at index 0.
+
+### `POST /api/repo/stashes/pop`
+
+```json
+{ "path": "...", "index": 0 }
+```
+
+`git stash pop stash@{index}`. Returns `409 worktree_dirty` (with
+a hint) when the apply hits a conflict; the stash stays in the
+list and the worktree is partially merged.
+
+### `POST /api/repo/stashes/drop`
+
+```json
+{ "path": "...", "index": 0 }
+```
+
+`git stash drop stash@{index}`. Discards without applying.
+
 ### `POST /api/repo/pick-folder` (desktop only)
 
 Pops the OS-native folder picker (`NSOpenPanel` on macOS, the

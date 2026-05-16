@@ -5,7 +5,7 @@
 
 use gitrust_types::{
     BlameView, BlobView, BranchInfo, CommitDiff, CommitInfo, FileDiff, RemoteBranchInfo,
-    RepoSummary, StatusEntry, TagInfo, TreeEntry,
+    RepoSummary, StashEntry, StatusEntry, TagInfo, TreeEntry,
 };
 
 // `q` percent-encodes a single query-string value. Paths can contain
@@ -90,6 +90,38 @@ pub(crate) async fn fetch_blame(path: &str, file: &str) -> Result<BlameView, Str
 #[cfg(target_arch = "wasm32")]
 pub(crate) async fn fetch_staged(path: &str) -> Result<Vec<StatusEntry>, String> {
     fetch_json(&format!("/api/repo/staged?path={}", q(path))).await
+}
+
+#[cfg(target_arch = "wasm32")]
+pub(crate) async fn fetch_stashes(path: &str) -> Result<Vec<StashEntry>, String> {
+    fetch_json(&format!("/api/repo/stashes?path={}", q(path))).await
+}
+
+#[cfg(target_arch = "wasm32")]
+pub(crate) async fn post_stash_save(path: &str, message: Option<&str>) -> Result<(), String> {
+    let mut body = serde_json::json!({ "path": path });
+    if let Some(m) = message.filter(|s| !s.trim().is_empty()) {
+        body["message"] = serde_json::Value::String(m.to_string());
+    }
+    post_empty("/api/repo/stashes/save", body).await
+}
+
+#[cfg(target_arch = "wasm32")]
+pub(crate) async fn post_stash_pop(path: &str, index: usize) -> Result<(), String> {
+    post_empty(
+        "/api/repo/stashes/pop",
+        serde_json::json!({ "path": path, "index": index }),
+    )
+    .await
+}
+
+#[cfg(target_arch = "wasm32")]
+pub(crate) async fn post_stash_drop(path: &str, index: usize) -> Result<(), String> {
+    post_empty(
+        "/api/repo/stashes/drop",
+        serde_json::json!({ "path": path, "index": index }),
+    )
+    .await
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -339,6 +371,26 @@ pub(crate) async fn fetch_blame(_path: &str, _file: &str) -> Result<BlameView, S
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) async fn fetch_staged(_path: &str) -> Result<Vec<StatusEntry>, String> {
     Err("native build: fetching not implemented".into())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) async fn fetch_stashes(_path: &str) -> Result<Vec<StashEntry>, String> {
+    Err("native build: fetching not implemented".into())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) async fn post_stash_save(_path: &str, _message: Option<&str>) -> Result<(), String> {
+    Err("native build: writes not implemented".into())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) async fn post_stash_pop(_path: &str, _index: usize) -> Result<(), String> {
+    Err("native build: writes not implemented".into())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) async fn post_stash_drop(_path: &str, _index: usize) -> Result<(), String> {
+    Err("native build: writes not implemented".into())
 }
 
 #[cfg(not(target_arch = "wasm32"))]

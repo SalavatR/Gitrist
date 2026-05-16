@@ -131,6 +131,19 @@ pub struct BlobView {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct StashEntry {
+    /// 0-based, newest first. `stash@{0}` is the most recent push.
+    pub index: usize,
+    /// Full ref name like `stash@{2}` — what `git` itself accepts on
+    /// the command line for pop/drop/show.
+    pub ref_name: String,
+    /// Subject line of the stash commit, e.g. `WIP on master: abc1234
+    /// fix: tweak`, or whatever `-m` message the user passed.
+    pub message: String,
+    pub time_unix: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct BlameLine {
     pub line_number: u32,
     pub text: String,
