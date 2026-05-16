@@ -8,54 +8,73 @@ use gitrust_types::{
     StatusEntry, TagInfo, TreeEntry,
 };
 
+// `q` percent-encodes a single query-string value. Paths can contain
+// spaces, `#`, `&`, `?` and non-ASCII — letting them through raw would
+// break URL parsing or get truncated at `#`.
+#[cfg(target_arch = "wasm32")]
+fn q(s: &str) -> std::borrow::Cow<'_, str> {
+    urlencoding::encode(s)
+}
+
 #[cfg(target_arch = "wasm32")]
 pub(crate) async fn fetch_summary(path: &str) -> Result<RepoSummary, String> {
-    fetch_json(&format!("/api/repo/summary?path={path}")).await
+    fetch_json(&format!("/api/repo/summary?path={}", q(path))).await
 }
 
 #[cfg(target_arch = "wasm32")]
 pub(crate) async fn fetch_log(path: &str, limit: usize) -> Result<Vec<CommitInfo>, String> {
-    fetch_json(&format!("/api/repo/log?path={path}&limit={limit}")).await
+    fetch_json(&format!("/api/repo/log?path={}&limit={limit}", q(path))).await
 }
 
 #[cfg(target_arch = "wasm32")]
 pub(crate) async fn fetch_status(path: &str) -> Result<Vec<StatusEntry>, String> {
-    fetch_json(&format!("/api/repo/status?path={path}")).await
+    fetch_json(&format!("/api/repo/status?path={}", q(path))).await
 }
 
 #[cfg(target_arch = "wasm32")]
 pub(crate) async fn fetch_branches(path: &str) -> Result<Vec<BranchInfo>, String> {
-    fetch_json(&format!("/api/repo/branches?path={path}")).await
+    fetch_json(&format!("/api/repo/branches?path={}", q(path))).await
 }
 
 #[cfg(target_arch = "wasm32")]
 pub(crate) async fn fetch_tags(path: &str) -> Result<Vec<TagInfo>, String> {
-    fetch_json(&format!("/api/repo/tags?path={path}")).await
+    fetch_json(&format!("/api/repo/tags?path={}", q(path))).await
 }
 
 #[cfg(target_arch = "wasm32")]
 pub(crate) async fn fetch_remotes(path: &str) -> Result<Vec<RemoteBranchInfo>, String> {
-    fetch_json(&format!("/api/repo/remotes?path={path}")).await
+    fetch_json(&format!("/api/repo/remotes?path={}", q(path))).await
 }
 
 #[cfg(target_arch = "wasm32")]
 pub(crate) async fn fetch_tree(path: &str) -> Result<Vec<TreeEntry>, String> {
-    fetch_json(&format!("/api/repo/tree?path={path}")).await
+    fetch_json(&format!("/api/repo/tree?path={}", q(path))).await
 }
 
 #[cfg(target_arch = "wasm32")]
 pub(crate) async fn fetch_blob(path: &str, oid: &str, file: &str) -> Result<BlobView, String> {
-    fetch_json(&format!("/api/repo/blob?path={path}&oid={oid}&file={file}")).await
+    fetch_json(&format!(
+        "/api/repo/blob?path={}&oid={}&file={}",
+        q(path),
+        q(oid),
+        q(file),
+    ))
+    .await
 }
 
 #[cfg(target_arch = "wasm32")]
 pub(crate) async fn fetch_diff(path: &str, oid: &str) -> Result<CommitDiff, String> {
-    fetch_json(&format!("/api/repo/diff?path={path}&oid={oid}")).await
+    fetch_json(&format!("/api/repo/diff?path={}&oid={}", q(path), q(oid),)).await
 }
 
 #[cfg(target_arch = "wasm32")]
 pub(crate) async fn fetch_diff_working(path: &str, file: &str) -> Result<FileDiff, String> {
-    fetch_json(&format!("/api/repo/diff/working?path={path}&file={file}")).await
+    fetch_json(&format!(
+        "/api/repo/diff/working?path={}&file={}",
+        q(path),
+        q(file),
+    ))
+    .await
 }
 
 #[cfg(target_arch = "wasm32")]

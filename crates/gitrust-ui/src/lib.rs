@@ -160,6 +160,8 @@ pub fn App() -> Element {
         }
     });
 
+    let repo_q = urlencoding::encode(&current_repo.read()).into_owned();
+
     rsx! {
         style { {include_str!("../style.css")} }
         div { class: "app",
@@ -274,13 +276,13 @@ pub fn App() -> Element {
                 "API · "
                 a { href: "/api/health", target: "_blank", "health" }
                 " · "
-                a { href: "/api/repo/summary?path={current_repo}", target: "_blank", "summary" }
+                a { href: "/api/repo/summary?path={repo_q}", target: "_blank", "summary" }
                 " · "
-                a { href: "/api/repo/log?path={current_repo}&limit={LOG_LIMIT}", target: "_blank", "log" }
+                a { href: "/api/repo/log?path={repo_q}&limit={LOG_LIMIT}", target: "_blank", "log" }
                 " · "
-                a { href: "/api/repo/status?path={current_repo}", target: "_blank", "status" }
+                a { href: "/api/repo/status?path={repo_q}", target: "_blank", "status" }
                 " · "
-                a { href: "/api/repo/branches?path={current_repo}", target: "_blank", "branches" }
+                a { href: "/api/repo/branches?path={repo_q}", target: "_blank", "branches" }
             }
         }
     }
