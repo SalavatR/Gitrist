@@ -1,6 +1,50 @@
 //! Client-side state: types passed between components and localStorage
 //! persistence for repo path and view-mode preferences.
 
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub(crate) enum ThemeMode {
+    Auto,
+    Light,
+    Dark,
+}
+
+impl ThemeMode {
+    /// Step through Auto → Light → Dark → Auto on each toggle click.
+    pub(crate) fn next(self) -> Self {
+        match self {
+            ThemeMode::Auto => ThemeMode::Light,
+            ThemeMode::Light => ThemeMode::Dark,
+            ThemeMode::Dark => ThemeMode::Auto,
+        }
+    }
+
+    pub(crate) fn label(self) -> &'static str {
+        match self {
+            ThemeMode::Auto => "Auto",
+            ThemeMode::Light => "Light",
+            ThemeMode::Dark => "Dark",
+        }
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn as_str(self) -> &'static str {
+        match self {
+            ThemeMode::Auto => "auto",
+            ThemeMode::Light => "light",
+            ThemeMode::Dark => "dark",
+        }
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn from_str(s: &str) -> Self {
+        match s {
+            "light" => ThemeMode::Light,
+            "dark" => ThemeMode::Dark,
+            _ => ThemeMode::Auto,
+        }
+    }
+}
+
 #[derive(Clone, PartialEq, Debug)]
 pub(crate) struct BlobSelection {
     pub oid: String,
@@ -22,6 +66,8 @@ const RECENT_REPOS_STORAGE_KEY: &str = "gitrust.repos";
 /// useful dropdown but small enough to scan at a glance.
 #[cfg(target_arch = "wasm32")]
 const RECENT_REPOS_MAX: usize = 8;
+#[cfg(target_arch = "wasm32")]
+const THEME_STORAGE_KEY: &str = "gitrust.theme";
 
 #[cfg(target_arch = "wasm32")]
 pub(crate) fn initial_repo() -> String {
@@ -120,3 +166,46 @@ pub(crate) fn record_recent_repo(path: &str) {
 
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn record_recent_repo(_path: &str) {}
+
+/// Read the user's saved theme preference. Auto on first load and
+/// when no value was persisted yet.
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn initial_theme() -> ThemeMode {
+    use gloo_storage::Storage;
+    gloo_storage::LocalStorage::get::<String>(THEME_STORAGE_KEY)
+        .ok()
+        .as_deref()
+        .map(ThemeMode::from_str)
+        .unwrap_or(ThemeMode::Auto)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn initial_theme() -> ThemeMode {
+    ThemeMode::Auto
+}
+
+/// Persist the theme to localStorage and reflect it in the document's
+/// `data-theme` attribute — `light` / `dark` force a palette, `auto`
+/// removes the attribute so `prefers-color-scheme` takes over.
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn apply_theme(mode: ThemeMode) {
+    use gloo_storage::Storage;
+    let _ = gloo_storage::LocalStorage::set(THEME_STORAGE_KEY, mode.as_str());
+
+    let window = gloo_utils::window();
+    if let Some(doc) = window.document()
+        && let Some(html) = doc.document_element()
+    {
+        match mode {
+            ThemeMode::Auto => {
+                let _ = html.remove_attribute("data-theme");
+            }
+            other => {
+                let _ = html.set_attribute("data-theme", other.as_str());
+            }
+        }
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn apply_theme(_mode: ThemeMode) {}

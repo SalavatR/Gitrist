@@ -24,8 +24,9 @@ use sidebar::{
     render_status_count, render_tag_count, render_tags, render_tree, render_tree_count,
 };
 use state::{
-    BlobSelection, LOG_LIMIT, REFS_POLL_INTERVAL_MS, STATUS_POLL_INTERVAL_MS, initial_repo,
-    initial_side_by_side, persist_repo, persist_side_by_side, recent_repos, record_recent_repo,
+    BlobSelection, LOG_LIMIT, REFS_POLL_INTERVAL_MS, STATUS_POLL_INTERVAL_MS, ThemeMode,
+    apply_theme, initial_repo, initial_side_by_side, initial_theme, persist_repo,
+    persist_side_by_side, recent_repos, record_recent_repo,
 };
 use time_fmt::sleep_ms;
 
@@ -39,6 +40,7 @@ pub fn App() -> Element {
     let selected_blob = use_signal(|| None::<BlobSelection>);
     let mut side_by_side = use_signal(initial_side_by_side);
     let mut recent = use_signal(recent_repos);
+    let mut theme = use_signal(initial_theme);
 
     use_effect(move || {
         let path = current_repo.read().clone();
@@ -49,6 +51,10 @@ pub fn App() -> Element {
     use_effect(move || {
         let sbs = *side_by_side.read();
         persist_side_by_side(sbs);
+    });
+    use_effect(move || {
+        let t = *theme.read();
+        apply_theme(t);
     });
 
     let mut summary = use_resource(move || {
@@ -195,6 +201,15 @@ pub fn App() -> Element {
                         }
                     }
                     button { r#type: "submit", "Load" }
+                }
+                button {
+                    class: "theme-toggle",
+                    title: "Theme — click to cycle",
+                    onclick: move |_| {
+                        let next: ThemeMode = theme.read().next();
+                        theme.set(next);
+                    },
+                    {theme.read().label()}
                 }
             }
 

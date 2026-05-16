@@ -39,8 +39,48 @@
   --sans:      -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
 }
 
+/* Manual override: `<html data-theme="dark">` forces dark regardless
+ * of OS preference. Keep these palettes in sync with the @media block
+ * below; when one changes, so should the other. */
+:root[data-theme="dark"] {
+  --bg:        #0f1115;
+  --surface:   #161a20;
+  --surface-2: #1c2027;
+  --border:    rgba(255, 255, 255, 0.08);
+  --border-2:  rgba(255, 255, 255, 0.04);
+  --text:      #d8dce4;
+  --text-2:    rgba(216, 220, 228, 0.78);
+  --muted:     rgba(216, 220, 228, 0.55);
+  --accent:    #6ea8ff;
+  --accent-bg: rgba(110, 168, 255, 0.16);
+
+  --add:       #4dbb74;
+  --add-bg:    rgba(77, 187, 116, 0.12);
+  --del:       #e15252;
+  --del-bg:    rgba(225, 82, 82, 0.14);
+  --modified:  #d49a3a;
+  --modified-bg: rgba(212, 154, 58, 0.14);
+  --untracked: #9aa0aa;
+  --untracked-bg: rgba(255, 255, 255, 0.06);
+
+  --tok-keyword:     #c586c0;
+  --tok-string:      #ce9178;
+  --tok-comment:     #6a9955;
+  --tok-number:      #b5cea8;
+  --tok-function:    #dcdcaa;
+  --tok-type:        #4ec9b0;
+  --tok-variable:    #d8dce4;
+  --tok-attribute:   #d7ba7d;
+  --tok-namespace:   #9cdcfe;
+  --tok-punctuation: #808080;
+
+  --shadow:    0 1px 2px rgba(0,0,0,0.4), 0 0 0 1px var(--border);
+}
+
+/* Auto: follow OS preference, unless the user explicitly picked
+ * a side via the toggle (`data-theme="light"` / `data-theme="dark"`). */
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]):not([data-theme="dark"]) {
     --bg:        #0f1115;
     --surface:   #161a20;
     --surface-2: #1c2027;
@@ -170,6 +210,24 @@ a:hover { text-decoration: underline; }
   font-weight: 500;
 }
 .repo-picker button:hover { background: var(--accent-bg); border-color: var(--accent); color: var(--accent); }
+
+.theme-toggle {
+  margin-left: 0.6rem;
+  padding: 0.4rem 0.8rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  color: var(--text-2);
+  cursor: pointer;
+  font-size: 0.82rem;
+  font-weight: 500;
+  min-width: 4.5rem;
+}
+.theme-toggle:hover {
+  background: var(--accent-bg);
+  border-color: var(--accent);
+  color: var(--accent);
+}
 
 /* ─── Split layout ────────────────────────────────────────── */
 
