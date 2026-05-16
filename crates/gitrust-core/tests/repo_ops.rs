@@ -287,6 +287,26 @@ fn list_staged_reports_added_and_modified_entries() {
 }
 
 #[test]
+fn list_staged_reports_renames_with_old_path() {
+    let r = TestRepo::new();
+    r.write("old-name.txt", "x\n");
+    r.git(&["add", "old-name.txt"]);
+    r.git(&["commit", "-q", "-m", "seed"]);
+    // git mv re-stages the rename as a single index entry.
+    r.git(&["mv", "old-name.txt", "new-name.txt"]);
+
+    let staged = gitrust_core::list_staged(r.path()).expect("list_staged");
+    let entry = staged
+        .iter()
+        .find(|e| e.path == "new-name.txt")
+        .expect("renamed entry");
+    assert_eq!(entry.kind, "renamed");
+    assert_eq!(entry.old_path.as_deref(), Some("old-name.txt"));
+    // The old path should not appear as a separate "deleted" entry.
+    assert!(!staged.iter().any(|e| e.path == "old-name.txt"));
+}
+
+#[test]
 fn list_staged_handles_unborn_head() {
     let r = TestRepo::new();
     r.write("a.txt", "x\n");

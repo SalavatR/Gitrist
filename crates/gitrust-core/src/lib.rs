@@ -81,15 +81,30 @@ pub fn list_status(path: &Path) -> anyhow::Result<Vec<StatusEntry>> {
                 out.push(StatusEntry {
                     path: rela_path.to_str_lossy().into_owned(),
                     kind: kind.into(),
+                    old_path: None,
                 });
             }
             Item::DirectoryContents { entry, .. } => {
                 out.push(StatusEntry {
                     path: entry.rela_path.to_str_lossy().into_owned(),
                     kind: "untracked".into(),
+                    old_path: None,
                 });
             }
-            Item::Rewrite { .. } => {}
+            Item::Rewrite {
+                source,
+                dirwalk_entry,
+                copy,
+                ..
+            } => {
+                let new_path = dirwalk_entry.rela_path.to_str_lossy().into_owned();
+                let old_path = source.rela_path().to_str_lossy().into_owned();
+                out.push(StatusEntry {
+                    path: new_path,
+                    kind: if copy { "copied" } else { "renamed" }.into(),
+                    old_path: Some(old_path),
+                });
+            }
         }
     }
     out.sort_by(|a, b| a.path.cmp(&b.path));
@@ -623,6 +638,7 @@ pub fn list_staged(path: &Path) -> anyhow::Result<Vec<StatusEntry>> {
             .map(|l| StatusEntry {
                 path: l.to_string(),
                 kind: "added".into(),
+                old_path: None,
             })
             .collect();
         entries.sort_by(|a, b| a.path.cmp(&b.path));
@@ -635,23 +651,32 @@ pub fn list_staged(path: &Path) -> anyhow::Result<Vec<StatusEntry>> {
     for line in stdout.lines() {
         let mut parts = line.splitn(3, '\t');
         let status = parts.next().unwrap_or("");
-        // R<score> / C<score> have an old-path then new-path; take new.
-        let path_part = if status.starts_with('R') || status.starts_with('C') {
-            parts.nth(1)
+        // R<score> / C<score> are followed by old-path \t new-path; for
+        // everything else there's just one path.
+        let (path, old_path) = if status.starts_with('R') || status.starts_with('C') {
+            let old = parts.next();
+            let new = parts.next();
+            match (old, new) {
+                (Some(o), Some(n)) => (n.to_string(), Some(o.to_string())),
+                _ => continue,
+            }
         } else {
-            parts.next()
-        };
-        let Some(p) = path_part else {
-            continue;
+            match parts.next() {
+                Some(p) => (p.to_string(), None),
+                None => continue,
+            }
         };
         let kind = match status.chars().next() {
             Some('A') => "added",
             Some('D') => "deleted",
+            Some('R') => "renamed",
+            Some('C') => "copied",
             _ => "modified",
         };
         entries.push(StatusEntry {
-            path: p.to_string(),
+            path,
             kind: kind.into(),
+            old_path,
         });
     }
     entries.sort_by(|a, b| a.path.cmp(&b.path));

@@ -207,8 +207,12 @@ within each section.
 
 ## Cleanup / nice-to-have
 
-- [ ] Rename/copy detection in `list_status` (currently `Item::Rewrite`
-      is dropped silently).
+- [x] Rename/copy detection in `list_status` and `list_staged`.
+      `Item::Rewrite` from gix now becomes a "renamed"/"copied"
+      `StatusEntry` with `old_path` populated; the porcelain
+      parser for `list_staged` parses `R<score>` / `C<score>`
+      lines into the same shape. Sidebar shows `old → new` next
+      to the badge, styled like the diff viewer's rename row.
 - [x] LICENSE-MIT and LICENSE-APACHE files at the repo root,
       matching the `MIT OR Apache-2.0` workspace declaration.
       Also picked up by the release workflow's archive packager.

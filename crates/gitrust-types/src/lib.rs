@@ -37,6 +37,10 @@ pub struct CommitInfo {
 pub struct StatusEntry {
     pub path: String,
     pub kind: String,
+    /// Previous path for `renamed` / `copied` entries; `None` otherwise.
+    /// Matches the shape `FileDiff.old_path` exposes for diffs.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub old_path: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

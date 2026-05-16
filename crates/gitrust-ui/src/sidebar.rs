@@ -412,7 +412,7 @@ pub(crate) fn render_status(
                                     span { class: "badge badge-{e.kind}", title: "{e.kind}",
                                         {status_glyph(&e.kind)}
                                     }
-                                    span { class: "path", "{e.path}" }
+                                    {render_status_path(&e)}
                                     button {
                                         class: "stage-btn discard",
                                         title: "Discard worktree changes to this file",
@@ -485,7 +485,7 @@ pub(crate) fn render_staged(
                                     span { class: "badge badge-{e.kind}", title: "{e.kind}",
                                         {status_glyph(&e.kind)}
                                     }
-                                    span { class: "path", "{e.path}" }
+                                    {render_status_path(&e)}
                                     button {
                                         class: "stage-btn unstage",
                                         title: "Unstage this file",
@@ -615,6 +615,28 @@ fn browser_prompt(msg: &str, default: &str) -> Option<String> {
 #[cfg(not(target_arch = "wasm32"))]
 fn browser_prompt(_msg: &str, _default: &str) -> Option<String> {
     None
+}
+
+/// Render the path cell for a status entry. Renames and copies get an
+/// `old → new` treatment matching the diff viewer's file header.
+fn render_status_path(e: &StatusEntry) -> Element {
+    match e.old_path.as_deref() {
+        Some(old) if old != e.path => {
+            let old = old.to_string();
+            let new = e.path.clone();
+            rsx! {
+                span { class: "path",
+                    span { class: "old-path", "{old}" }
+                    span { class: "rename-arrow", "→" }
+                    "{new}"
+                }
+            }
+        }
+        _ => {
+            let path = e.path.clone();
+            rsx! { span { class: "path", "{path}" } }
+        }
+    }
 }
 
 fn status_glyph(kind: &str) -> &'static str {

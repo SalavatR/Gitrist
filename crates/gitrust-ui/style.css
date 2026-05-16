@@ -691,17 +691,19 @@ details.file-diff[open] .disclosure::before { content: "▾"; }
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.file-diff .file-header .old-path {
+.file-diff .file-header .old-path,
+.status-list .path .old-path {
   flex: 0 0 auto;
   color: var(--muted);
   text-decoration: line-through;
   text-decoration-color: rgba(127, 127, 127, 0.4);
 }
-.file-diff .file-header .rename-arrow {
+.file-diff .file-header .rename-arrow,
+.status-list .path .rename-arrow {
   color: var(--muted);
   font-size: 0.9rem;
   flex: 0 0 auto;
-  padding: 0 0.1rem;
+  padding: 0 0.2rem;
 }
 .file-diff .file-header .stats {
   font-variant-numeric: tabular-nums;
