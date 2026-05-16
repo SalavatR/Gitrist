@@ -1855,6 +1855,7 @@ dependencies = [
  "gitrust-types",
  "gix",
  "serde",
+ "tempfile",
  "thiserror 1.0.69",
  "tree-sitter",
  "tree-sitter-css",
