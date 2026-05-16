@@ -359,7 +359,10 @@ mod tests {
     #[test]
     fn categorizes_known_paths() {
         let repo = PathBuf::from("/r");
-        assert_eq!(categorize(&ev(&repo, &[".git/HEAD"]), &repo), vec!["head_changed"]);
+        assert_eq!(
+            categorize(&ev(&repo, &[".git/HEAD"]), &repo),
+            vec!["head_changed"]
+        );
         assert_eq!(
             categorize(&ev(&repo, &[".git/refs/heads/master"]), &repo),
             vec!["refs_changed"],
@@ -368,7 +371,10 @@ mod tests {
             categorize(&ev(&repo, &[".git/packed-refs"]), &repo),
             vec!["refs_changed"],
         );
-        assert_eq!(categorize(&ev(&repo, &[".git/index"]), &repo), vec!["index_changed"]);
+        assert_eq!(
+            categorize(&ev(&repo, &[".git/index"]), &repo),
+            vec!["index_changed"]
+        );
         assert_eq!(
             categorize(&ev(&repo, &["src/main.rs"]), &repo),
             vec!["worktree_changed"],
