@@ -91,23 +91,25 @@ within each section.
       Author identity comes from the repo's gitconfig. UI exposes
       it as a textarea + Commit button between the summary card
       and the history table; disabled when nothing is staged.
-- [x] Branch ops (partial): create (with optional `switch=true` for
-      `git checkout -b`), delete (safe; refuses unmerged), and
-      checkout, all under `/api/repo/branches/{create,delete}` and
-      `/api/repo/checkout`. Sidebar branch list grows hover-revealed
-      `→` (switch) and `×` (delete) buttons per non-HEAD entry, plus
-      a `New branch` input + Create button at the bottom that does
-      create-and-switch in one shot. Rename and force-delete are
-      still pending.
+- [x] Branch ops: create (with optional `switch=true` for
+      `git checkout -b`), delete (safe + `force` field for
+      `git branch -D`), rename, and checkout. Sidebar branch list
+      grows hover-revealed `✎` (rename via `prompt()`), `→`
+      (switch), and `×` (delete) buttons. Delete tries safe first
+      and falls back to a browser `confirm()` "force delete?"
+      prompt on the unmerged-branch error. Plus a `New branch`
+      input + Create button at the bottom that does
+      create-and-switch in one shot.
 - [x] Discard worktree changes for a file (`git restore <file>`).
       `POST /api/repo/discard` and a `↺` button next to each
       "Working tree" entry, hover-revealed alongside the stage `+`.
-- [x] Commit body / author override on the commit endpoint. Body
-      already worked (newlines in `message`; git uses the first line
-      as the subject). Author is now an optional `author` field on
-      the POST body, forwarded as `--author=<Name <email>>`. UI
-      doesn't expose an author field yet — server is ready when it
-      does.
+- [x] Commit body / author override. Body works via newlines in
+      `message` (git uses the first line as the subject). Author is
+      an optional `author` field on POST commit, forwarded as
+      `--author=<Name <email>>`. UI exposes it as a small
+      "Author override — Name <email>" input below the message
+      textarea; empty value falls through to the repo's gitconfig
+      identity.
 
 ## UX
 

@@ -14,13 +14,16 @@ use crate::diff::{render_file_diff, render_line_content};
 use crate::state::BlobSelection;
 use crate::time_fmt::{format_time, format_time_relative};
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn render_commit_form(
     mut message: Signal<String>,
     mut error: Signal<Option<String>>,
+    mut author: Signal<String>,
     staged_count: usize,
     current_repo: Signal<String>,
 ) -> Element {
     let msg_text = message.read().clone();
+    let author_text = author.read().clone();
     let can_submit = !msg_text.trim().is_empty() && staged_count > 0;
     let err_text = error.read().clone();
     rsx! {
@@ -36,6 +39,16 @@ pub(crate) fn render_commit_form(
                     error.set(None);
                 },
             }
+            input {
+                class: "commit-author",
+                r#type: "text",
+                placeholder: "Author override — Name <email>  (optional)",
+                value: "{author_text}",
+                spellcheck: "false",
+                autocapitalize: "off",
+                autocomplete: "off",
+                oninput: move |e| author.set(e.value()),
+            }
             div { class: "commit-row",
                 if staged_count == 0 {
                     span { class: "muted small", "Nothing staged." }
@@ -48,11 +61,15 @@ pub(crate) fn render_commit_form(
                     onclick: move |_| {
                         let path = current_repo.read().clone();
                         let body = message.read().clone();
+                        let auth = author.read().trim().to_string();
+                        let auth_opt = if auth.is_empty() { None } else { Some(auth) };
                         spawn(async move {
-                            match crate::fetch::post_commit(&path, &body).await {
+                            match crate::fetch::post_commit(&path, &body, auth_opt.as_deref()).await {
                                 Ok(_) => {
                                     message.set(String::new());
                                     error.set(None);
+                                    // Keep author across commits so repeated
+                                    // commits in a session don't re-type it.
                                 }
                                 Err(e) => error.set(Some(e)),
                             }

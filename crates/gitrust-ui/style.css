@@ -942,6 +942,27 @@ details.file-diff[open] .disclosure::before { content: "▾"; }
   border-color: var(--del);
   color: var(--del);
 }
+.branch-act.rename:hover {
+  background: var(--modified-bg);
+  border-color: var(--modified);
+  color: var(--modified);
+}
+
+.commit-author {
+  width: 100%;
+  padding: 0.45rem 0.6rem;
+  font-family: var(--mono);
+  font-size: 0.82rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  color: var(--text);
+  outline: none;
+}
+.commit-author:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-bg);
+}
 
 /* New-branch form below the branch list. */
 .new-branch {

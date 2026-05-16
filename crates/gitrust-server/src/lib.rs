@@ -19,8 +19,9 @@ use gitrust_core::{
     RepoSummary, StatusEntry, TagInfo, TreeEntry, blame_file, checkout as core_checkout,
     commit as core_commit, commit_info, create_branch as core_create_branch,
     delete_branch as core_delete_branch, diff_commit, diff_working, discard_files, list_branches,
-    list_remote_branches, list_staged, list_status, list_tags, list_tree, log_commits, show_blob,
-    stage_files as core_stage_files, summarize_repo, unstage_files as core_unstage,
+    list_remote_branches, list_staged, list_status, list_tags, list_tree, log_commits,
+    rename_branch as core_rename_branch, show_blob, stage_files as core_stage_files,
+    summarize_repo, unstage_files as core_unstage,
 };
 
 #[derive(Serialize)]
@@ -227,12 +228,31 @@ async fn repo_branch_create(Json(body): Json<CreateBranchBody>) -> Result<Status
 struct DeleteBranchBody {
     path: String,
     name: String,
+    #[serde(default)]
+    force: bool,
 }
 
 async fn repo_branch_delete(Json(body): Json<DeleteBranchBody>) -> Result<StatusCode, ApiError> {
-    let DeleteBranchBody { path, name } = body;
+    let DeleteBranchBody { path, name, force } = body;
     let repo = PathBuf::from(path);
-    tokio::task::spawn_blocking(move || core_delete_branch(&repo, &name))
+    tokio::task::spawn_blocking(move || core_delete_branch(&repo, &name, force))
+        .await
+        .map_err(|e| anyhow::anyhow!("join error: {e}"))?
+        .map_err(ApiError::from)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Deserialize)]
+struct RenameBranchBody {
+    path: String,
+    old: String,
+    new: String,
+}
+
+async fn repo_branch_rename(Json(body): Json<RenameBranchBody>) -> Result<StatusCode, ApiError> {
+    let RenameBranchBody { path, old, new } = body;
+    let repo = PathBuf::from(path);
+    tokio::task::spawn_blocking(move || core_rename_branch(&repo, &old, &new))
         .await
         .map_err(|e| anyhow::anyhow!("join error: {e}"))?
         .map_err(ApiError::from)?;
@@ -603,6 +623,7 @@ pub fn router(source: WebSource, auth: AuthState) -> Router {
         .route("/repo/commit", get(repo_commit_get).post(repo_commit))
         .route("/repo/branches/create", post(repo_branch_create))
         .route("/repo/branches/delete", post(repo_branch_delete))
+        .route("/repo/branches/rename", post(repo_branch_rename))
         .route("/repo/checkout", post(repo_checkout))
         .route_layer(middleware::from_fn_with_state(auth.clone(), require_auth));
 

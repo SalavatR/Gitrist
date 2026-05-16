@@ -396,6 +396,66 @@ async fn delete_branch_drops_a_merged_branch() {
 }
 
 #[tokio::test]
+async fn force_delete_branch_drops_unmerged_branch() {
+    let (server, r) = setup_with_initial_commit().await;
+    r.git(&["checkout", "-q", "-b", "diverge"]);
+    r.write("b.txt", "y\n");
+    r.git(&["add", "b.txt"]);
+    r.git(&["commit", "-q", "-m", "ahead"]);
+    r.git(&["checkout", "-q", "master"]);
+
+    // Safe delete refuses.
+    let (status, _) = post_json(
+        &server,
+        "/api/repo/branches/delete",
+        Some("test-token"),
+        serde_json::json!({
+            "path": r.path().to_str().unwrap(),
+            "name": "diverge",
+        }),
+    )
+    .await;
+    assert_eq!(status, 400);
+
+    // Force delete succeeds.
+    let (status, _) = post_json(
+        &server,
+        "/api/repo/branches/delete",
+        Some("test-token"),
+        serde_json::json!({
+            "path": r.path().to_str().unwrap(),
+            "name": "diverge",
+            "force": true,
+        }),
+    )
+    .await;
+    assert_eq!(status, 204);
+    let listing = r.git(&["branch"]);
+    assert!(!listing.lines().any(|l| l.contains("diverge")));
+}
+
+#[tokio::test]
+async fn rename_branch_swaps_names() {
+    let (server, r) = setup_with_initial_commit().await;
+    r.git(&["branch", "old-name"]);
+    let (status, _) = post_json(
+        &server,
+        "/api/repo/branches/rename",
+        Some("test-token"),
+        serde_json::json!({
+            "path": r.path().to_str().unwrap(),
+            "old": "old-name",
+            "new": "new-name",
+        }),
+    )
+    .await;
+    assert_eq!(status, 204);
+    let listing = r.git(&["branch"]);
+    assert!(listing.lines().any(|l| l.contains("new-name")));
+    assert!(!listing.lines().any(|l| l.contains("old-name")));
+}
+
+#[tokio::test]
 async fn checkout_switches_head() {
     let (server, r) = setup_with_initial_commit().await;
     r.git(&["branch", "side"]);

@@ -99,6 +99,7 @@ fn AppContent() -> Element {
     let mut theme = use_signal(initial_theme);
     let commit_msg = use_signal(String::new);
     let commit_err = use_signal(|| None::<String>);
+    let commit_author = use_signal(String::new);
     let new_branch = use_signal(String::new);
 
     use_effect(move || {
@@ -399,7 +400,13 @@ fn AppContent() -> Element {
                             .and_then(|r| r.as_ref().ok())
                             .map(|v| v.len())
                             .unwrap_or(0);
-                        render_commit_form(commit_msg, commit_err, count, current_repo)
+                        render_commit_form(
+                            commit_msg,
+                            commit_err,
+                            commit_author,
+                            count,
+                            current_repo,
+                        )
                     }
 
                     section { class: "main-block",

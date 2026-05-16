@@ -551,12 +551,24 @@ just creates it.
 ### `POST /api/repo/branches/delete`
 
 ```json
-{ "path": "...", "name": "feature" }
+{ "path": "...", "name": "feature", "force": false }
 ```
 
-Safe delete — uses `git branch -d`, so unmerged branches refuse
-and surface a `not fully merged` error. The UI offers no force
-toggle yet; users have to drop into `git branch -D` for that.
+`force: false` (default) is `git branch -d` — refuses to drop
+an unmerged branch and surfaces the standard `not fully merged`
+error. `force: true` is `git branch -D` and drops it
+unconditionally. The UI tries safe first; on the unmerged-branch
+error it offers a `confirm()` dialog and re-posts with
+`force: true`.
+
+### `POST /api/repo/branches/rename`
+
+```json
+{ "path": "...", "old": "feature", "new": "feature-v2" }
+```
+
+`git branch -m <old> <new>`. Refuses when `<new>` already
+exists.
 
 ### `POST /api/repo/checkout`
 

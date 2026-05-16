@@ -403,7 +403,7 @@ fn delete_branch_removes_a_merged_branch() {
     r.git(&["commit", "-q", "-m", "init"]);
     r.git(&["branch", "doomed"]);
 
-    gitrust_core::delete_branch(r.path(), "doomed").expect("delete");
+    gitrust_core::delete_branch(r.path(), "doomed", false).expect("delete");
     let bs = gitrust_core::list_branches(r.path()).expect("list");
     assert!(!bs.iter().any(|b| b.name == "doomed"));
 }
@@ -420,11 +420,46 @@ fn delete_branch_refuses_unmerged() {
     r.git(&["commit", "-q", "-m", "ahead"]);
     r.git(&["checkout", "-q", "master"]);
 
-    let err = gitrust_core::delete_branch(r.path(), "diverge").expect_err("should refuse");
+    let err = gitrust_core::delete_branch(r.path(), "diverge", false).expect_err("should refuse");
     assert!(
         err.to_string().to_lowercase().contains("not fully merged")
             || err.to_string().to_lowercase().contains("delete branch"),
         "expected unmerged-branch hint, got `{err}`"
+    );
+    // Force should drop it regardless.
+    gitrust_core::delete_branch(r.path(), "diverge", true).expect("force delete");
+    let bs = gitrust_core::list_branches(r.path()).expect("list");
+    assert!(!bs.iter().any(|b| b.name == "diverge"));
+}
+
+#[test]
+fn rename_branch_swaps_name() {
+    let r = TestRepo::new();
+    r.write("a", "x");
+    r.git(&["add", "a"]);
+    r.git(&["commit", "-q", "-m", "init"]);
+    r.git(&["branch", "old-name"]);
+
+    gitrust_core::rename_branch(r.path(), "old-name", "new-name").expect("rename");
+    let bs = gitrust_core::list_branches(r.path()).expect("list");
+    let names: std::collections::BTreeSet<&str> = bs.iter().map(|b| b.name.as_str()).collect();
+    assert!(names.contains("new-name"));
+    assert!(!names.contains("old-name"));
+}
+
+#[test]
+fn rename_branch_refuses_when_target_exists() {
+    let r = TestRepo::new();
+    r.write("a", "x");
+    r.git(&["add", "a"]);
+    r.git(&["commit", "-q", "-m", "init"]);
+    r.git(&["branch", "alpha"]);
+    r.git(&["branch", "beta"]);
+    let err = gitrust_core::rename_branch(r.path(), "alpha", "beta").expect_err("collide");
+    assert!(
+        err.to_string().to_lowercase().contains("already exists")
+            || err.to_string().to_lowercase().contains("beta"),
+        "expected collision hint, got `{err}`"
     );
 }
 

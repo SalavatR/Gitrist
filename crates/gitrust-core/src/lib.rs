@@ -719,14 +719,28 @@ pub fn create_branch(
     run_git(repo, &args).map(|_| ())
 }
 
-/// `git branch -d <name>` — safe delete; refuses to remove an
-/// unmerged branch (git enforces this, not us). The UI surfaces
-/// that error and can offer a "force delete" follow-up later.
-pub fn delete_branch(repo: &Path, name: &str) -> anyhow::Result<()> {
+/// `git branch -d <name>` (safe) or `git branch -D <name>` (force).
+/// Safe delete refuses to drop an unmerged branch — the UI handles
+/// that error by offering a "force delete" confirm dialog that
+/// re-issues with `force = true`.
+pub fn delete_branch(repo: &Path, name: &str, force: bool) -> anyhow::Result<()> {
     if name.trim().is_empty() {
         anyhow::bail!("branch name must not be empty");
     }
-    run_git(repo, &["branch", "-d", name]).map(|_| ())
+    let flag = if force { "-D" } else { "-d" };
+    run_git(repo, &["branch", flag, name]).map(|_| ())
+}
+
+/// `git branch -m <old> <new>`. Refuses (via git) when `new` already
+/// exists.
+pub fn rename_branch(repo: &Path, old: &str, new: &str) -> anyhow::Result<()> {
+    if old.trim().is_empty() || new.trim().is_empty() {
+        anyhow::bail!("branch names must not be empty");
+    }
+    if old == new {
+        return Ok(());
+    }
+    run_git(repo, &["branch", "-m", old, new]).map(|_| ())
 }
 
 /// `git reset HEAD -- <files>` — drop the index entries back to whatever

@@ -186,6 +186,7 @@ pub(crate) fn render_branches(
                     for b in rows {
                         {
                             let name_for_switch = b.name.clone();
+                            let name_for_rename = b.name.clone();
                             let name_for_delete = b.name.clone();
                             let is_head = b.is_head;
                             rsx! {
@@ -200,6 +201,15 @@ pub(crate) fn render_branches(
                                                 .unwrap_or_else(|| "—".to_string())
                                         }
                                     }
+                                    button {
+                                        class: "branch-act rename",
+                                        title: "Rename this branch",
+                                        onclick: move |evt| {
+                                            evt.stop_propagation();
+                                            rename_branch(name_for_rename.clone(), current_repo);
+                                        },
+                                        "✎"
+                                    }
                                     if !is_head {
                                         button {
                                             class: "branch-act switch",
@@ -212,7 +222,7 @@ pub(crate) fn render_branches(
                                         }
                                         button {
                                             class: "branch-act delete",
-                                            title: "Delete this branch (refuses if unmerged)",
+                                            title: "Delete this branch (with force-confirm if unmerged)",
                                             onclick: move |evt| {
                                                 evt.stop_propagation();
                                                 delete_branch(name_for_delete.clone(), current_repo);
@@ -536,7 +546,40 @@ fn checkout_branch(name: String, current_repo: Signal<String>) {
 fn delete_branch(name: String, current_repo: Signal<String>) {
     let path = current_repo.read().clone();
     spawn(async move {
-        let _ = crate::fetch::post_branch_delete(&path, &name).await;
+        match crate::fetch::post_branch_delete(&path, &name, false).await {
+            Ok(_) => {}
+            Err(e) => {
+                let lower = e.to_lowercase();
+                // git's wording for "branch hasn't been merged into HEAD";
+                // any other failure surfaces as a normal sidebar error row.
+                if !(lower.contains("not fully merged")
+                    || lower.contains("--force")
+                    || lower.contains("'-d' to delete"))
+                {
+                    return;
+                }
+                let msg = format!(
+                    "Branch `{name}` has commits not reachable from HEAD.\n\nForce delete?"
+                );
+                if browser_confirm(&msg) {
+                    let _ = crate::fetch::post_branch_delete(&path, &name, true).await;
+                }
+            }
+        }
+    });
+}
+
+fn rename_branch(old: String, current_repo: Signal<String>) {
+    let Some(new) = browser_prompt(&format!("Rename branch `{old}` to:"), &old) else {
+        return;
+    };
+    let new = new.trim().to_string();
+    if new.is_empty() || new == old {
+        return;
+    }
+    let path = current_repo.read().clone();
+    spawn(async move {
+        let _ = crate::fetch::post_branch_rename(&path, &old, &new).await;
     });
 }
 
@@ -547,6 +590,31 @@ fn create_branch(name: String, current_repo: Signal<String>) {
         // and is the default expectation for "I made a new branch".
         let _ = crate::fetch::post_branch_create(&path, &name, true).await;
     });
+}
+
+#[cfg(target_arch = "wasm32")]
+fn browser_confirm(msg: &str) -> bool {
+    gloo_utils::window()
+        .confirm_with_message(msg)
+        .unwrap_or(false)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn browser_confirm(_msg: &str) -> bool {
+    false
+}
+
+#[cfg(target_arch = "wasm32")]
+fn browser_prompt(msg: &str, default: &str) -> Option<String> {
+    gloo_utils::window()
+        .prompt_with_message_and_default(msg, default)
+        .ok()
+        .flatten()
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn browser_prompt(_msg: &str, _default: &str) -> Option<String> {
+    None
 }
 
 fn status_glyph(kind: &str) -> &'static str {
