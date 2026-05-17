@@ -10,6 +10,12 @@ on:
     tags: ['v*']
   workflow_dispatch:
 
+# GITHUB_TOKEN is read-only by default — `softprops/action-gh-release`
+# needs write access on `contents` to create the release object and
+# upload assets, otherwise it 403s on the "Generate release notes" call.
+permissions:
+  contents: write
+
 env:
   CARGO_TERM_COLOR: always
   WBG_VERSION: '0.2.121'
