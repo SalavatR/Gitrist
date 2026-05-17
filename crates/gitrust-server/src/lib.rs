@@ -16,15 +16,18 @@ use tower_http::trace::TraceLayer;
 
 use gitrust_core::{
     BlameView, BlobView, BranchInfo, CommitDiff, CommitInfo, FileDiff, NetworkOpResult,
-    RemoteBranchInfo, RepoSummary, StashEntry, StatusEntry, TagInfo, TreeEntry, blame_file,
-    checkout as core_checkout, cherry_pick as core_cherry_pick, commit as core_commit, commit_info,
-    create_branch as core_create_branch, delete_branch as core_delete_branch, diff_commit,
-    diff_working, discard_files, fetch as core_fetch, list_branches, list_remote_branches,
-    list_staged, list_status, list_tags, list_tree, log_commits, merge as core_merge,
-    pull as core_pull, push as core_push, rename_branch as core_rename_branch, show_blob,
-    stage_files as core_stage_files, stash_drop as core_stash_drop, stash_list as core_stash_list,
-    stash_pop as core_stash_pop, stash_save as core_stash_save, summarize_repo,
-    unstage_files as core_unstage,
+    RemoteBranchInfo, RepoState, RepoSummary, StashEntry, StatusEntry, TagInfo, TreeEntry,
+    blame_file, checkout as core_checkout, cherry_pick as core_cherry_pick,
+    cherry_pick_abort as core_cherry_pick_abort, cherry_pick_continue as core_cherry_pick_continue,
+    commit as core_commit, commit_info, create_branch as core_create_branch,
+    delete_branch as core_delete_branch, diff_commit, diff_working, discard_files,
+    fetch as core_fetch, list_branches, list_remote_branches, list_staged, list_status, list_tags,
+    list_tree, log_commits, merge as core_merge, merge_abort as core_merge_abort,
+    merge_continue as core_merge_continue, pull as core_pull, push as core_push,
+    rename_branch as core_rename_branch, repo_state as core_repo_state,
+    resolve_file as core_resolve_file, show_blob, stage_files as core_stage_files,
+    stash_drop as core_stash_drop, stash_list as core_stash_list, stash_pop as core_stash_pop,
+    stash_save as core_stash_save, summarize_repo, unstage_files as core_unstage,
 };
 
 #[derive(Serialize)]
@@ -401,6 +404,65 @@ struct PushBody {
     force_with_lease: bool,
     #[serde(default)]
     set_upstream: bool,
+}
+
+async fn repo_state(Query(q): Query<PathQuery>) -> Result<Json<RepoState>, ApiError> {
+    let path = PathBuf::from(q.path);
+    core_repo_state(&path).map(Json).map_err(ApiError::from)
+}
+
+async fn repo_merge_abort(Json(body): Json<PathQuery>) -> Result<StatusCode, ApiError> {
+    let repo = PathBuf::from(body.path);
+    tokio::task::spawn_blocking(move || core_merge_abort(&repo))
+        .await
+        .map_err(|e| anyhow::anyhow!("join error: {e}"))?
+        .map_err(ApiError::from)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn repo_merge_continue(Json(body): Json<PathQuery>) -> Result<StatusCode, ApiError> {
+    let repo = PathBuf::from(body.path);
+    tokio::task::spawn_blocking(move || core_merge_continue(&repo))
+        .await
+        .map_err(|e| anyhow::anyhow!("join error: {e}"))?
+        .map_err(ApiError::from)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn repo_cherry_pick_abort(Json(body): Json<PathQuery>) -> Result<StatusCode, ApiError> {
+    let repo = PathBuf::from(body.path);
+    tokio::task::spawn_blocking(move || core_cherry_pick_abort(&repo))
+        .await
+        .map_err(|e| anyhow::anyhow!("join error: {e}"))?
+        .map_err(ApiError::from)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn repo_cherry_pick_continue(Json(body): Json<PathQuery>) -> Result<StatusCode, ApiError> {
+    let repo = PathBuf::from(body.path);
+    tokio::task::spawn_blocking(move || core_cherry_pick_continue(&repo))
+        .await
+        .map_err(|e| anyhow::anyhow!("join error: {e}"))?
+        .map_err(ApiError::from)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Deserialize)]
+struct ResolveBody {
+    path: String,
+    file: String,
+    /// `"ours"` | `"theirs"` — which side of the merge to keep.
+    side: String,
+}
+
+async fn repo_resolve(Json(body): Json<ResolveBody>) -> Result<StatusCode, ApiError> {
+    let ResolveBody { path, file, side } = body;
+    let repo = PathBuf::from(path);
+    tokio::task::spawn_blocking(move || core_resolve_file(&repo, &file, &side))
+        .await
+        .map_err(|e| anyhow::anyhow!("join error: {e}"))?
+        .map_err(ApiError::from)?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 #[derive(Deserialize)]
@@ -910,7 +972,16 @@ pub fn router(source: WebSource, auth: AuthState) -> Router {
         .route("/repo/pull", post(repo_pull))
         .route("/repo/push", post(repo_push))
         .route("/repo/merge", post(repo_merge))
-        .route("/repo/cherry-pick", post(repo_cherry_pick));
+        .route("/repo/cherry-pick", post(repo_cherry_pick))
+        .route("/repo/state", get(repo_state))
+        .route("/repo/merge/abort", post(repo_merge_abort))
+        .route("/repo/merge/continue", post(repo_merge_continue))
+        .route("/repo/cherry-pick/abort", post(repo_cherry_pick_abort))
+        .route(
+            "/repo/cherry-pick/continue",
+            post(repo_cherry_pick_continue),
+        )
+        .route("/repo/resolve", post(repo_resolve));
 
     #[cfg(feature = "desktop")]
     let protected = protected.route("/repo/pick-folder", post(pick_folder));

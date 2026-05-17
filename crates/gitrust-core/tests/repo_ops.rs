@@ -965,3 +965,134 @@ fn run_git_str(cwd: &std::path::Path, args: &[&str]) -> String {
     }
     String::from_utf8(out.stdout).unwrap_or_default()
 }
+
+fn setup_conflicting_merge(r: &TestRepo) -> String {
+    // Common ancestor + two divergent edits on the same line; returns
+    // the oid of the branch we'll merge into HEAD.
+    r.write("a", "base\n");
+    r.git(&["add", "a"]);
+    r.git(&["commit", "-q", "-m", "base"]);
+    r.git(&["checkout", "-q", "-b", "feature"]);
+    r.write("a", "from feature\n");
+    r.git(&["add", "a"]);
+    r.git(&["commit", "-q", "-m", "feature edits"]);
+    let feature_oid = r.git(&["rev-parse", "HEAD"]).trim().to_string();
+    r.git(&["checkout", "-q", "master"]);
+    r.write("a", "from master\n");
+    r.git(&["add", "a"]);
+    r.git(&["commit", "-q", "-m", "master edits"]);
+    feature_oid
+}
+
+#[test]
+fn repo_state_is_clean_by_default() {
+    let r = TestRepo::new();
+    r.write("a", "x");
+    r.git(&["add", "a"]);
+    r.git(&["commit", "-q", "-m", "init"]);
+
+    let state = gitrust_core::repo_state(r.path()).expect("state");
+    assert_eq!(state.kind, "clean");
+    assert!(state.subject.is_none());
+    assert!(state.conflicted.is_empty());
+}
+
+#[test]
+fn repo_state_reports_merging_after_conflict() {
+    let r = TestRepo::new();
+    setup_conflicting_merge(&r);
+    let _ = gitrust_core::merge(r.path(), "feature", false);
+    let state = gitrust_core::repo_state(r.path()).expect("state");
+    assert_eq!(state.kind, "merging");
+    assert!(
+        state
+            .subject
+            .as_deref()
+            .is_some_and(|s| s.contains("feature")),
+        "MERGE_MSG subject should mention the target branch; got {:?}",
+        state.subject
+    );
+    assert_eq!(state.conflicted, vec!["a".to_string()]);
+}
+
+#[test]
+fn merge_abort_returns_to_clean() {
+    let r = TestRepo::new();
+    setup_conflicting_merge(&r);
+    let _ = gitrust_core::merge(r.path(), "feature", false);
+
+    gitrust_core::merge_abort(r.path()).expect("abort");
+    let state = gitrust_core::repo_state(r.path()).expect("state");
+    assert_eq!(state.kind, "clean");
+    // Worktree restored to pre-merge content.
+    let on_disk = std::fs::read_to_string(r.path().join("a")).unwrap();
+    assert_eq!(on_disk, "from master\n");
+}
+
+#[test]
+fn resolve_to_ours_then_merge_continue_lands_a_merge_commit() {
+    let r = TestRepo::new();
+    setup_conflicting_merge(&r);
+    let _ = gitrust_core::merge(r.path(), "feature", false);
+
+    gitrust_core::resolve_file(r.path(), "a", "ours").expect("resolve ours");
+    let on_disk = std::fs::read_to_string(r.path().join("a")).unwrap();
+    assert_eq!(on_disk, "from master\n", "ours should keep master's edit");
+    gitrust_core::merge_continue(r.path()).expect("continue");
+
+    let state = gitrust_core::repo_state(r.path()).expect("state");
+    assert_eq!(state.kind, "clean");
+    let parents = r.git(&["rev-list", "--parents", "-n", "1", "HEAD"]);
+    assert_eq!(
+        parents.split_whitespace().count(),
+        3,
+        "merge commit should have two parents"
+    );
+}
+
+#[test]
+fn resolve_to_theirs_takes_the_incoming_side() {
+    let r = TestRepo::new();
+    setup_conflicting_merge(&r);
+    let _ = gitrust_core::merge(r.path(), "feature", false);
+
+    gitrust_core::resolve_file(r.path(), "a", "theirs").expect("resolve theirs");
+    let on_disk = std::fs::read_to_string(r.path().join("a")).unwrap();
+    assert_eq!(on_disk, "from feature\n");
+}
+
+#[test]
+fn resolve_file_rejects_unknown_side() {
+    let r = TestRepo::new();
+    setup_conflicting_merge(&r);
+    let _ = gitrust_core::merge(r.path(), "feature", false);
+
+    let err = gitrust_core::resolve_file(r.path(), "a", "mine").expect_err("bad side");
+    assert!(err.to_string().contains("ours") || err.to_string().contains("theirs"));
+}
+
+#[test]
+fn cherry_pick_abort_clears_the_in_progress_state() {
+    let r = TestRepo::new();
+    r.write("a", "base\n");
+    r.git(&["add", "a"]);
+    r.git(&["commit", "-q", "-m", "base"]);
+    r.git(&["checkout", "-q", "-b", "feature"]);
+    r.write("a", "feature\n");
+    r.git(&["add", "a"]);
+    r.git(&["commit", "-q", "-m", "feature edits"]);
+    let oid = r.git(&["rev-parse", "HEAD"]).trim().to_string();
+    r.git(&["checkout", "-q", "master"]);
+    r.write("a", "master\n");
+    r.git(&["add", "a"]);
+    r.git(&["commit", "-q", "-m", "master edits"]);
+
+    let _ = gitrust_core::cherry_pick(r.path(), &oid);
+    let mid = gitrust_core::repo_state(r.path()).expect("state");
+    assert_eq!(mid.kind, "cherry-picking");
+    assert_eq!(mid.conflicted, vec!["a".to_string()]);
+
+    gitrust_core::cherry_pick_abort(r.path()).expect("abort");
+    let after = gitrust_core::repo_state(r.path()).expect("state");
+    assert_eq!(after.kind, "clean");
+}

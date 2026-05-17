@@ -7,8 +7,8 @@ use gix::diff::blob::{Algorithm, InternedInput, Token as IDToken};
 
 pub use gitrust_types::{
     BlameLine, BlameView, BlobLine, BlobView, BranchInfo, CommitDiff, CommitInfo, DiffHunk,
-    DiffLine, FileDiff, NetworkOpResult, RemoteBranchInfo, RepoSummary, StashEntry, StatusEntry,
-    TagInfo, Token, TreeEntry,
+    DiffLine, FileDiff, NetworkOpResult, RemoteBranchInfo, RepoState, RepoSummary, StashEntry,
+    StatusEntry, TagInfo, Token, TreeEntry,
 };
 
 fn build_commit_info(repo: &gix::Repository, oid: gix::ObjectId) -> anyhow::Result<CommitInfo> {
@@ -1029,6 +1029,85 @@ pub fn commit(repo: &Path, message: &str, author: Option<&str>) -> anyhow::Resul
     let out = run_git(repo, &["rev-parse", "HEAD"])?;
     let oid = String::from_utf8_lossy(&out.stdout).trim().to_string();
     Ok(oid)
+}
+
+/// Snapshot of any in-progress merge / cherry-pick. `kind = "clean"`
+/// when neither operation is mid-flight; otherwise the conflicted
+/// paths and the staged commit subject are surfaced so the UI can
+/// show a banner with one-click Abort / Continue.
+pub fn repo_state(path: &Path) -> anyhow::Result<RepoState> {
+    let repo = gix::open(path)?;
+    let git_dir = repo.git_dir();
+    let kind = if git_dir.join("MERGE_HEAD").exists() {
+        "merging"
+    } else if git_dir.join("CHERRY_PICK_HEAD").exists() {
+        "cherry-picking"
+    } else {
+        "clean"
+    };
+    if kind == "clean" {
+        return Ok(RepoState {
+            kind: kind.into(),
+            subject: None,
+            conflicted: Vec::new(),
+        });
+    }
+    let subject = std::fs::read_to_string(git_dir.join("MERGE_MSG"))
+        .ok()
+        .and_then(|s| {
+            s.lines()
+                .find(|l| !l.trim().is_empty())
+                .map(|l| l.trim().to_string())
+        });
+    let conflicted: Vec<String> = list_status(path)?
+        .into_iter()
+        .filter(|e| e.kind == "conflict")
+        .map(|e| e.path)
+        .collect();
+    Ok(RepoState {
+        kind: kind.into(),
+        subject,
+        conflicted,
+    })
+}
+
+/// `git merge --abort` — drop the in-progress merge, restore the
+/// worktree to the pre-merge commit and remove `MERGE_HEAD`.
+pub fn merge_abort(repo: &Path) -> anyhow::Result<()> {
+    run_git(repo, &["merge", "--abort"]).map(|_| ())
+}
+
+/// `git merge --continue` (equivalent to `git commit --no-edit` after
+/// resolving all conflicts) — finalize the merge using the message git
+/// stashed in `MERGE_MSG`.
+pub fn merge_continue(repo: &Path) -> anyhow::Result<()> {
+    run_git(repo, &["commit", "--no-edit", "-q"]).map(|_| ())
+}
+
+/// `git cherry-pick --abort`.
+pub fn cherry_pick_abort(repo: &Path) -> anyhow::Result<()> {
+    run_git(repo, &["cherry-pick", "--abort"]).map(|_| ())
+}
+
+/// `git cherry-pick --continue` after resolving all conflicts.
+pub fn cherry_pick_continue(repo: &Path) -> anyhow::Result<()> {
+    run_git(repo, &["cherry-pick", "--continue"]).map(|_| ())
+}
+
+/// Resolve a single conflicted file to one side of the merge:
+/// `side = "ours"` keeps the current branch's version, `"theirs"`
+/// takes the incoming side. After replacing the worktree copy, the
+/// file is staged (`git add`) so a subsequent `merge --continue` or
+/// `cherry-pick --continue` sees it resolved.
+pub fn resolve_file(repo: &Path, file: &str, side: &str) -> anyhow::Result<()> {
+    let flag = match side.trim() {
+        "ours" => "--ours",
+        "theirs" => "--theirs",
+        other => anyhow::bail!("resolve side must be `ours` or `theirs`, got `{other}`"),
+    };
+    run_git(repo, &["checkout", flag, "--", file])?;
+    run_git(repo, &["add", "--", file])?;
+    Ok(())
 }
 
 /// `git fetch [remote]` — sync remote-tracking refs without touching

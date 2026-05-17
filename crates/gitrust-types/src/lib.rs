@@ -160,6 +160,23 @@ pub struct BlameView {
     pub lines: Vec<BlameLine>,
 }
 
+/// Snapshot of the worktree's "mid-operation" state. `kind` is the
+/// authoritative field; the others are populated when relevant.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RepoState {
+    /// `"clean"` | `"merging"` | `"cherry-picking"`.
+    pub kind: String,
+    /// Subject line that git stashed for the in-progress commit, lifted
+    /// from `.git/MERGE_MSG`. Useful as a banner label. `None` when
+    /// clean or when the file is missing/empty.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub subject: Option<String>,
+    /// Paths of files currently in conflict (`git status` `UU` / `UA` /
+    /// `AU` rows). Empty when clean; usually non-empty mid-merge.
+    #[serde(default)]
+    pub conflicted: Vec<String>,
+}
+
 /// Result of a network operation (`fetch`, `pull`, `push`). `summary`
 /// is the human-readable output the git CLI produced (mostly stderr;
 /// stdout appended when non-empty). UIs surface it as-is so the user

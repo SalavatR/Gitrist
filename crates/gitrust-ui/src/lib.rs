@@ -17,8 +17,8 @@ mod ws;
 
 use fetch::{
     fetch_blame, fetch_blob, fetch_branches, fetch_diff, fetch_diff_working, fetch_log,
-    fetch_remotes, fetch_staged, fetch_stashes, fetch_status, fetch_summary, fetch_tags,
-    fetch_tree,
+    fetch_remotes, fetch_staged, fetch_stashes, fetch_state, fetch_status, fetch_summary,
+    fetch_tags, fetch_tree,
 };
 use main_panel::{render_commit_form, render_detail, render_log, render_summary_card};
 use sidebar::{
@@ -164,6 +164,10 @@ fn AppContent() -> Element {
     let stashes = use_resource(move || {
         let path = current_repo.read().clone();
         async move { fetch_stashes(&path).await }
+    });
+    let mut state = use_resource(move || {
+        let path = current_repo.read().clone();
+        async move { fetch_state(&path).await }
     });
 
     // Polling stays as a silent fallback — WS push is the primary path.
@@ -411,6 +415,150 @@ fn AppContent() -> Element {
                         *AUTH_TOKEN.write() = None;
                     },
                     "Sign out"
+                }
+            }
+
+            {
+                // In-progress merge / cherry-pick banner with Abort /
+                // Continue affordances. Visible only when the worktree
+                // is mid-op; clean state renders nothing.
+                let s = state.read_unchecked().clone();
+                let busy = *net_busy.read();
+                match s.as_ref().and_then(|r| r.as_ref().ok()) {
+                    Some(rs) if rs.kind != "clean" => {
+                        let kind = rs.kind.clone();
+                        let subject = rs.subject.clone().unwrap_or_else(|| kind.clone());
+                        let n = rs.conflicted.len();
+                        let kind_for_abort = kind.clone();
+                        let kind_for_continue = kind.clone();
+                        rsx! {
+                            div { class: "merge-banner",
+                                div { class: "merge-banner-head",
+                                    strong { "{kind}" }
+                                    " · "
+                                    span { "{subject}" }
+                                    span { class: "muted small",
+                                        if n == 0 {
+                                            " · all conflicts resolved"
+                                        } else if n == 1 {
+                                            " · 1 conflict"
+                                        } else {
+                                            " · {n} conflicts"
+                                        }
+                                    }
+                                }
+                                div { class: "merge-banner-actions",
+                                    button {
+                                        class: "merge-action danger",
+                                        disabled: busy,
+                                        onclick: move |_| {
+                                            let path = current_repo.read().clone();
+                                            let kind = kind_for_abort.clone();
+                                            net_busy.set(true);
+                                            net_result.set(None);
+                                            spawn(async move {
+                                                let r = if kind == "merging" {
+                                                    fetch::post_merge_abort(&path).await
+                                                } else {
+                                                    fetch::post_cherry_pick_abort(&path).await
+                                                };
+                                                net_busy.set(false);
+                                                match r {
+                                                    Ok(()) => net_result.set(None),
+                                                    Err(e) => net_result.set(Some(Err(e))),
+                                                }
+                                                state.restart();
+                                            });
+                                        },
+                                        "Abort"
+                                    }
+                                    button {
+                                        class: "merge-action primary",
+                                        disabled: busy || n > 0,
+                                        title: if n > 0 {
+                                            "Resolve all conflicts first"
+                                        } else {
+                                            "Finalize with the staged merge message"
+                                        },
+                                        onclick: move |_| {
+                                            let path = current_repo.read().clone();
+                                            let kind = kind_for_continue.clone();
+                                            net_busy.set(true);
+                                            net_result.set(None);
+                                            spawn(async move {
+                                                let r = if kind == "merging" {
+                                                    fetch::post_merge_continue(&path).await
+                                                } else {
+                                                    fetch::post_cherry_pick_continue(&path).await
+                                                };
+                                                net_busy.set(false);
+                                                match r {
+                                                    Ok(()) => net_result.set(None),
+                                                    Err(e) => net_result.set(Some(Err(e))),
+                                                }
+                                                state.restart();
+                                            });
+                                        },
+                                        "Continue"
+                                    }
+                                }
+                                if !rs.conflicted.is_empty() {
+                                    ul { class: "merge-conflicts",
+                                        for f in rs.conflicted.iter().cloned() {
+                                            li { key: "{f}",
+                                                code { "{f}" }
+                                                {
+                                                    let f_ours = f.clone();
+                                                    let f_theirs = f.clone();
+                                                    rsx! {
+                                                        button {
+                                                            class: "merge-resolve",
+                                                            disabled: busy,
+                                                            title: "Keep HEAD's version of this file and stage it",
+                                                            onclick: move |_| {
+                                                                let path = current_repo.read().clone();
+                                                                let file = f_ours.clone();
+                                                                net_busy.set(true);
+                                                                spawn(async move {
+                                                                    let r = fetch::post_resolve(&path, &file, "ours").await;
+                                                                    net_busy.set(false);
+                                                                    if let Err(e) = r {
+                                                                        net_result.set(Some(Err(e)));
+                                                                    }
+                                                                    state.restart();
+                                                                });
+                                                            },
+                                                            "Use ours"
+                                                        }
+                                                        button {
+                                                            class: "merge-resolve",
+                                                            disabled: busy,
+                                                            title: "Take the incoming version of this file and stage it",
+                                                            onclick: move |_| {
+                                                                let path = current_repo.read().clone();
+                                                                let file = f_theirs.clone();
+                                                                net_busy.set(true);
+                                                                spawn(async move {
+                                                                    let r = fetch::post_resolve(&path, &file, "theirs").await;
+                                                                    net_busy.set(false);
+                                                                    if let Err(e) = r {
+                                                                        net_result.set(Some(Err(e)));
+                                                                    }
+                                                                    state.restart();
+                                                                });
+                                                            },
+                                                            "Use theirs"
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    _ => rsx! {},
                 }
             }
 

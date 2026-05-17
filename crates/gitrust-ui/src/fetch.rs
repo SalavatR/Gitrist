@@ -5,7 +5,7 @@
 
 use gitrust_types::{
     BlameView, BlobView, BranchInfo, CommitDiff, CommitInfo, FileDiff, NetworkOpResult,
-    RemoteBranchInfo, RepoSummary, StashEntry, StatusEntry, TagInfo, TreeEntry,
+    RemoteBranchInfo, RepoState, RepoSummary, StashEntry, StatusEntry, TagInfo, TreeEntry,
 };
 
 // `q` percent-encodes a single query-string value. Paths can contain
@@ -264,6 +264,52 @@ pub(crate) async fn post_cherry_pick(path: &str, oid: &str) -> Result<NetworkOpR
     post_with_response(
         "/api/repo/cherry-pick",
         serde_json::json!({ "path": path, "oid": oid }),
+    )
+    .await
+}
+
+#[cfg(target_arch = "wasm32")]
+pub(crate) async fn fetch_state(path: &str) -> Result<RepoState, String> {
+    fetch_json(&format!("/api/repo/state?path={}", q(path))).await
+}
+
+#[cfg(target_arch = "wasm32")]
+pub(crate) async fn post_merge_abort(path: &str) -> Result<(), String> {
+    post_empty("/api/repo/merge/abort", serde_json::json!({ "path": path })).await
+}
+
+#[cfg(target_arch = "wasm32")]
+pub(crate) async fn post_merge_continue(path: &str) -> Result<(), String> {
+    post_empty(
+        "/api/repo/merge/continue",
+        serde_json::json!({ "path": path }),
+    )
+    .await
+}
+
+#[cfg(target_arch = "wasm32")]
+pub(crate) async fn post_cherry_pick_abort(path: &str) -> Result<(), String> {
+    post_empty(
+        "/api/repo/cherry-pick/abort",
+        serde_json::json!({ "path": path }),
+    )
+    .await
+}
+
+#[cfg(target_arch = "wasm32")]
+pub(crate) async fn post_cherry_pick_continue(path: &str) -> Result<(), String> {
+    post_empty(
+        "/api/repo/cherry-pick/continue",
+        serde_json::json!({ "path": path }),
+    )
+    .await
+}
+
+#[cfg(target_arch = "wasm32")]
+pub(crate) async fn post_resolve(path: &str, file: &str, side: &str) -> Result<(), String> {
+    post_empty(
+        "/api/repo/resolve",
+        serde_json::json!({ "path": path, "file": file, "side": side }),
     )
     .await
 }
@@ -575,5 +621,35 @@ pub(crate) async fn post_merge(
 
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) async fn post_cherry_pick(_path: &str, _oid: &str) -> Result<NetworkOpResult, String> {
+    Err("native build: writes not implemented".into())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) async fn fetch_state(_path: &str) -> Result<RepoState, String> {
+    Err("native build: fetching not implemented".into())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) async fn post_merge_abort(_path: &str) -> Result<(), String> {
+    Err("native build: writes not implemented".into())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) async fn post_merge_continue(_path: &str) -> Result<(), String> {
+    Err("native build: writes not implemented".into())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) async fn post_cherry_pick_abort(_path: &str) -> Result<(), String> {
+    Err("native build: writes not implemented".into())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) async fn post_cherry_pick_continue(_path: &str) -> Result<(), String> {
+    Err("native build: writes not implemented".into())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) async fn post_resolve(_path: &str, _file: &str, _side: &str) -> Result<(), String> {
     Err("native build: writes not implemented".into())
 }
