@@ -695,6 +695,15 @@ details.tree-folder summary.tree-folder-row::-webkit-details-marker { display: n
   opacity: 0.5;
   cursor: progress;
 }
+.reset-mode {
+  padding: 0.3rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  color: var(--text-2);
+  font-size: 0.8rem;
+  cursor: pointer;
+}
 .history-search {
   flex: 0 1 22rem;
   padding: 0.3rem 0.6rem;

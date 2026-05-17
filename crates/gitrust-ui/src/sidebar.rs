@@ -594,14 +594,14 @@ fn create_branch(name: String, current_repo: Signal<String>) {
 }
 
 #[cfg(target_arch = "wasm32")]
-fn browser_confirm(msg: &str) -> bool {
+pub(crate) fn browser_confirm(msg: &str) -> bool {
     gloo_utils::window()
         .confirm_with_message(msg)
         .unwrap_or(false)
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn browser_confirm(_msg: &str) -> bool {
+pub(crate) fn browser_confirm(_msg: &str) -> bool {
     false
 }
 

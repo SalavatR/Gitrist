@@ -24,10 +24,14 @@ use gitrust_core::{
     fetch as core_fetch, list_branches, list_remote_branches, list_staged, list_status, list_tags,
     list_tree, log_commits, merge as core_merge, merge_abort as core_merge_abort,
     merge_continue as core_merge_continue, pull as core_pull, push as core_push,
-    rename_branch as core_rename_branch, repo_state as core_repo_state,
-    resolve_file as core_resolve_file, show_blob, stage_files as core_stage_files,
-    stash_drop as core_stash_drop, stash_list as core_stash_list, stash_pop as core_stash_pop,
-    stash_save as core_stash_save, summarize_repo, unstage_files as core_unstage,
+    rebase as core_rebase, rebase_abort as core_rebase_abort,
+    rebase_continue as core_rebase_continue, rebase_skip as core_rebase_skip,
+    rename_branch as core_rename_branch, repo_state as core_repo_state, reset as core_reset,
+    resolve_file as core_resolve_file, revert as core_revert, revert_abort as core_revert_abort,
+    revert_continue as core_revert_continue, revert_skip as core_revert_skip, show_blob,
+    stage_files as core_stage_files, stash_drop as core_stash_drop, stash_list as core_stash_list,
+    stash_pop as core_stash_pop, stash_save as core_stash_save, summarize_repo,
+    unstage_files as core_unstage,
 };
 
 #[derive(Serialize)]
@@ -459,6 +463,115 @@ async fn repo_resolve(Json(body): Json<ResolveBody>) -> Result<StatusCode, ApiEr
     let ResolveBody { path, file, side } = body;
     let repo = PathBuf::from(path);
     tokio::task::spawn_blocking(move || core_resolve_file(&repo, &file, &side))
+        .await
+        .map_err(|e| anyhow::anyhow!("join error: {e}"))?
+        .map_err(ApiError::from)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Deserialize)]
+struct RebaseBody {
+    path: String,
+    upstream: String,
+}
+
+async fn repo_rebase(Json(body): Json<RebaseBody>) -> Result<Json<NetworkOpResult>, ApiError> {
+    let RebaseBody { path, upstream } = body;
+    let repo = PathBuf::from(path);
+    let result = tokio::task::spawn_blocking(move || core_rebase(&repo, &upstream))
+        .await
+        .map_err(|e| anyhow::anyhow!("join error: {e}"))?
+        .map_err(ApiError::from)?;
+    Ok(Json(result))
+}
+
+async fn repo_rebase_abort(Json(body): Json<PathQuery>) -> Result<StatusCode, ApiError> {
+    let repo = PathBuf::from(body.path);
+    tokio::task::spawn_blocking(move || core_rebase_abort(&repo))
+        .await
+        .map_err(|e| anyhow::anyhow!("join error: {e}"))?
+        .map_err(ApiError::from)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn repo_rebase_continue(Json(body): Json<PathQuery>) -> Result<StatusCode, ApiError> {
+    let repo = PathBuf::from(body.path);
+    tokio::task::spawn_blocking(move || core_rebase_continue(&repo))
+        .await
+        .map_err(|e| anyhow::anyhow!("join error: {e}"))?
+        .map_err(ApiError::from)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn repo_rebase_skip(Json(body): Json<PathQuery>) -> Result<StatusCode, ApiError> {
+    let repo = PathBuf::from(body.path);
+    tokio::task::spawn_blocking(move || core_rebase_skip(&repo))
+        .await
+        .map_err(|e| anyhow::anyhow!("join error: {e}"))?
+        .map_err(ApiError::from)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Deserialize)]
+struct RevertBody {
+    path: String,
+    oid: String,
+}
+
+async fn repo_revert(Json(body): Json<RevertBody>) -> Result<Json<NetworkOpResult>, ApiError> {
+    let RevertBody { path, oid } = body;
+    let repo = PathBuf::from(path);
+    let result = tokio::task::spawn_blocking(move || core_revert(&repo, &oid))
+        .await
+        .map_err(|e| anyhow::anyhow!("join error: {e}"))?
+        .map_err(ApiError::from)?;
+    Ok(Json(result))
+}
+
+async fn repo_revert_abort(Json(body): Json<PathQuery>) -> Result<StatusCode, ApiError> {
+    let repo = PathBuf::from(body.path);
+    tokio::task::spawn_blocking(move || core_revert_abort(&repo))
+        .await
+        .map_err(|e| anyhow::anyhow!("join error: {e}"))?
+        .map_err(ApiError::from)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn repo_revert_continue(Json(body): Json<PathQuery>) -> Result<StatusCode, ApiError> {
+    let repo = PathBuf::from(body.path);
+    tokio::task::spawn_blocking(move || core_revert_continue(&repo))
+        .await
+        .map_err(|e| anyhow::anyhow!("join error: {e}"))?
+        .map_err(ApiError::from)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn repo_revert_skip(Json(body): Json<PathQuery>) -> Result<StatusCode, ApiError> {
+    let repo = PathBuf::from(body.path);
+    tokio::task::spawn_blocking(move || core_revert_skip(&repo))
+        .await
+        .map_err(|e| anyhow::anyhow!("join error: {e}"))?
+        .map_err(ApiError::from)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Deserialize)]
+struct ResetBody {
+    path: String,
+    target: String,
+    /// `"soft"` | `"mixed"` | `"hard"`. Defaults to `"mixed"` (git's default).
+    #[serde(default = "default_reset_mode")]
+    mode: String,
+}
+
+fn default_reset_mode() -> String {
+    "mixed".into()
+}
+
+async fn repo_reset(Json(body): Json<ResetBody>) -> Result<StatusCode, ApiError> {
+    let ResetBody { path, target, mode } = body;
+    let repo = PathBuf::from(path);
+    tokio::task::spawn_blocking(move || core_reset(&repo, &target, &mode))
         .await
         .map_err(|e| anyhow::anyhow!("join error: {e}"))?
         .map_err(ApiError::from)?;
@@ -981,7 +1094,16 @@ pub fn router(source: WebSource, auth: AuthState) -> Router {
             "/repo/cherry-pick/continue",
             post(repo_cherry_pick_continue),
         )
-        .route("/repo/resolve", post(repo_resolve));
+        .route("/repo/resolve", post(repo_resolve))
+        .route("/repo/rebase", post(repo_rebase))
+        .route("/repo/rebase/abort", post(repo_rebase_abort))
+        .route("/repo/rebase/continue", post(repo_rebase_continue))
+        .route("/repo/rebase/skip", post(repo_rebase_skip))
+        .route("/repo/revert", post(repo_revert))
+        .route("/repo/revert/abort", post(repo_revert_abort))
+        .route("/repo/revert/continue", post(repo_revert_continue))
+        .route("/repo/revert/skip", post(repo_revert_skip))
+        .route("/repo/reset", post(repo_reset));
 
     #[cfg(feature = "desktop")]
     let protected = protected.route("/repo/pick-folder", post(pick_folder));

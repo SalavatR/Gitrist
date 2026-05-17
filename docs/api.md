@@ -740,6 +740,52 @@ commit (`git cherry-pick`). Conflict behaviour mirrors `merge`: the
 error envelope carries git's "could not apply …" wording and the
 worktree is left mid-pick.
 
+### `POST /api/repo/rebase`
+
+```json
+{ "path": "...", "upstream": "master" }
+```
+
+`git rebase <upstream>` — replay the current branch on top of
+`upstream`. On conflict, `repo_state.kind` becomes `"rebasing"` and
+the conflict banner exposes Abort / Skip / Continue.
+
+### `POST /api/repo/rebase/{abort,continue,skip}`
+
+```json
+{ "path": "..." }
+```
+
+`git rebase --abort` / `--continue` / `--skip`. Continue runs with
+`GIT_EDITOR=true` so it doesn't block on the editor for commit
+messages of the commit being replayed.
+
+### `POST /api/repo/revert`
+
+```json
+{ "path": "...", "oid": "..." }
+```
+
+`git revert --no-edit <oid>` — append a new commit on the current
+branch that inverts `oid`. On conflict, `repo_state.kind` becomes
+`"reverting"`.
+
+### `POST /api/repo/revert/{abort,continue,skip}`
+
+Body: `{ "path": "..." }`. Same shape as rebase's resume actions.
+
+### `POST /api/repo/reset`
+
+```json
+{ "path": "...", "target": "HEAD~1", "mode": "mixed" }
+```
+
+`git reset --<mode> <target>`. `mode` is `"soft"`, `"mixed"`
+(default), or `"hard"`. Returns `204 No Content`. `target` accepts
+anything `git reset` accepts: branch name, tag, oid, `HEAD~N`.
+Hard reset is destructive — the UI confirms via `window.confirm`
+before calling.
+
 ### `GET /api/repo/log?path=<path>&limit=<N>&q=<filter>&all=<bool>`
 
 The existing log endpoint grew an `all` flag. `all=true` walks every

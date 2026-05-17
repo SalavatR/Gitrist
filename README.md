@@ -31,10 +31,16 @@ What works today:
   `push` (`-u` / `--force-with-lease` flags optional). All shell
   out to the user's `git` binary so SSH agents and HTTPS
   credential helpers Just Work.
-- History-movers: `merge` (with `--no-ff` opt-in) and
-  `cherry-pick`, both reachable as buttons in the commit-detail
-  toolbar so the user picks a target commit visually instead of
-  retyping its oid.
+- History-movers: `merge` (with `--no-ff` opt-in), `cherry-pick`,
+  `rebase`, `revert`, and `reset` (with `soft`/`mixed`/`hard`
+  modes), all reachable as buttons in the commit-detail toolbar
+  so the user picks a target commit visually instead of retyping
+  its oid. Reset prompts a confirm dialog on `hard` mode.
+- Conflict resolution: when a merge / rebase / cherry-pick /
+  revert hits a conflict, a banner above the main panel surfaces
+  the in-progress state, the conflicted file list with per-file
+  Use-ours / Use-theirs buttons, and Abort / Skip / Continue
+  controls (Skip available for rebase / revert).
 - History view: log endpoint accepts `all=true` to walk every
   local + remote-tracking branch tip — visible as an "All
   branches" toggle next to the history filter. The log block is
@@ -72,9 +78,9 @@ Deferred:
 - Streaming progress for long fetch/push (current implementation
   blocks until the git CLI completes; UI shows "Working…" the
   whole time).
-- Conflict-resolution UI — merge / cherry-pick land the conflict
-  state but the user resolves via the CLI for now.
-- Rebase, reset, revert.
+- Per-hunk conflict resolution (UI currently picks ours/theirs
+  per *file*; an in-place 3-way hunk picker is the natural
+  next step).
 - Hunk-level (and line-level) staging, à la `git add -p`.
 - Tag create / delete, file-history (log filtered to a single path),
   arbitrary-ref diff.

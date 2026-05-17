@@ -1031,15 +1031,19 @@ pub fn commit(repo: &Path, message: &str, author: Option<&str>) -> anyhow::Resul
     Ok(oid)
 }
 
-/// Snapshot of any in-progress merge / cherry-pick. `kind = "clean"`
-/// when neither operation is mid-flight; otherwise the conflicted
-/// paths and the staged commit subject are surfaced so the UI can
-/// show a banner with one-click Abort / Continue.
+/// Snapshot of any in-progress merge / cherry-pick / rebase / revert.
+/// `kind = "clean"` when nothing is mid-flight; otherwise the
+/// conflicted paths and a human-readable subject are surfaced so the
+/// UI can show a banner with one-click Abort / Continue / Skip.
 pub fn repo_state(path: &Path) -> anyhow::Result<RepoState> {
     let repo = gix::open(path)?;
     let git_dir = repo.git_dir();
-    let kind = if git_dir.join("MERGE_HEAD").exists() {
+    let kind = if git_dir.join("rebase-merge").is_dir() || git_dir.join("rebase-apply").is_dir() {
+        "rebasing"
+    } else if git_dir.join("MERGE_HEAD").exists() {
         "merging"
+    } else if git_dir.join("REVERT_HEAD").exists() {
+        "reverting"
     } else if git_dir.join("CHERRY_PICK_HEAD").exists() {
         "cherry-picking"
     } else {
@@ -1052,13 +1056,37 @@ pub fn repo_state(path: &Path) -> anyhow::Result<RepoState> {
             conflicted: Vec::new(),
         });
     }
-    let subject = std::fs::read_to_string(git_dir.join("MERGE_MSG"))
-        .ok()
-        .and_then(|s| {
-            s.lines()
-                .find(|l| !l.trim().is_empty())
-                .map(|l| l.trim().to_string())
-        });
+    let subject = match kind {
+        "rebasing" => {
+            // `rebase-merge` is the modern layout. `head-name` is the ref
+            // being rebased (e.g. `refs/heads/feature`), `onto` is the
+            // target oid. Either layout may also have a `message` file
+            // for the commit currently being applied.
+            let dir = if git_dir.join("rebase-merge").is_dir() {
+                git_dir.join("rebase-merge")
+            } else {
+                git_dir.join("rebase-apply")
+            };
+            let head_name = std::fs::read_to_string(dir.join("head-name"))
+                .ok()
+                .map(|s| s.trim().trim_start_matches("refs/heads/").to_string());
+            let onto = std::fs::read_to_string(dir.join("onto"))
+                .ok()
+                .map(|s| s.trim().chars().take(8).collect::<String>());
+            match (head_name, onto) {
+                (Some(h), Some(o)) => Some(format!("{h} onto {o}")),
+                (Some(h), None) => Some(h),
+                _ => None,
+            }
+        }
+        _ => std::fs::read_to_string(git_dir.join("MERGE_MSG"))
+            .ok()
+            .and_then(|s| {
+                s.lines()
+                    .find(|l| !l.trim().is_empty())
+                    .map(|l| l.trim().to_string())
+            }),
+    };
     let conflicted: Vec<String> = list_status(path)?
         .into_iter()
         .filter(|e| e.kind == "conflict")
@@ -1092,6 +1120,104 @@ pub fn cherry_pick_abort(repo: &Path) -> anyhow::Result<()> {
 /// `git cherry-pick --continue` after resolving all conflicts.
 pub fn cherry_pick_continue(repo: &Path) -> anyhow::Result<()> {
     run_git(repo, &["cherry-pick", "--continue"]).map(|_| ())
+}
+
+/// `git rebase <upstream>` — replay the current branch's commits on
+/// top of `upstream` (a branch name, tag, or commit oid). Conflicts
+/// land in `.git/rebase-merge/` and `repo_state` reports
+/// `kind = "rebasing"`; the same conflict banner handles abort /
+/// continue / skip.
+pub fn rebase(repo: &Path, upstream: &str) -> anyhow::Result<NetworkOpResult> {
+    let upstream = upstream.trim();
+    if upstream.is_empty() {
+        anyhow::bail!("rebase target must not be empty");
+    }
+    let out = run_git(repo, &["rebase", upstream])?;
+    Ok(NetworkOpResult {
+        op: "rebase".into(),
+        remote: upstream.into(),
+        summary: format_network_output(&out, "rebase finished"),
+    })
+}
+
+pub fn rebase_abort(repo: &Path) -> anyhow::Result<()> {
+    run_git(repo, &["rebase", "--abort"]).map(|_| ())
+}
+
+pub fn rebase_continue(repo: &Path) -> anyhow::Result<()> {
+    // `GIT_EDITOR=true` accepts whatever message git would have opened
+    // an editor for (the commit being applied retains its original
+    // message); without this `git rebase --continue` blocks on stdin.
+    let out = std::process::Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args(["rebase", "--continue"])
+        .env("GIT_EDITOR", "true")
+        .output()
+        .map_err(|e| anyhow::anyhow!("spawning `git rebase --continue`: {e}"))?;
+    if !out.status.success() {
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        let detail = match (stderr.trim(), stdout.trim()) {
+            ("", "") => "(no output)".to_string(),
+            ("", s) => s.to_string(),
+            (e, "") => e.to_string(),
+            (e, s) => format!("{e}\n{s}"),
+        };
+        anyhow::bail!("git rebase --continue failed: {detail}");
+    }
+    Ok(())
+}
+
+pub fn rebase_skip(repo: &Path) -> anyhow::Result<()> {
+    run_git(repo, &["rebase", "--skip"]).map(|_| ())
+}
+
+/// `git revert <oid>` — append a new commit on the current branch
+/// that inverts `oid`'s changes. Conflicts land in `REVERT_HEAD` /
+/// `MERGE_MSG`; `repo_state.kind` becomes `"reverting"`.
+pub fn revert(repo: &Path, oid: &str) -> anyhow::Result<NetworkOpResult> {
+    let oid = oid.trim();
+    if oid.is_empty() {
+        anyhow::bail!("revert oid must not be empty");
+    }
+    let out = run_git(repo, &["revert", "--no-edit", oid])?;
+    Ok(NetworkOpResult {
+        op: "revert".into(),
+        remote: oid.into(),
+        summary: format_network_output(&out, "revert applied"),
+    })
+}
+
+pub fn revert_abort(repo: &Path) -> anyhow::Result<()> {
+    run_git(repo, &["revert", "--abort"]).map(|_| ())
+}
+
+pub fn revert_continue(repo: &Path) -> anyhow::Result<()> {
+    run_git(repo, &["revert", "--continue", "--no-edit"]).map(|_| ())
+}
+
+pub fn revert_skip(repo: &Path) -> anyhow::Result<()> {
+    run_git(repo, &["revert", "--skip"]).map(|_| ())
+}
+
+/// `git reset --<mode> <target>` — move HEAD to `target`. `mode` is
+/// one of `"soft"` (keep index + worktree), `"mixed"` (reset index,
+/// keep worktree — git's default), or `"hard"` (reset everything,
+/// destructive). `target` accepts anything `git reset` accepts:
+/// branch name, tag, commit oid, `HEAD~N`, etc.
+pub fn reset(repo: &Path, target: &str, mode: &str) -> anyhow::Result<()> {
+    let target = target.trim();
+    if target.is_empty() {
+        anyhow::bail!("reset target must not be empty");
+    }
+    let flag = match mode.trim() {
+        "soft" => "--soft",
+        "mixed" | "" => "--mixed",
+        "hard" => "--hard",
+        other => anyhow::bail!("reset mode must be `soft`, `mixed`, or `hard`, got `{other}`"),
+    };
+    run_git(repo, &["reset", "-q", flag, target]).map(|_| ())
 }
 
 /// Resolve a single conflicted file to one side of the merge:

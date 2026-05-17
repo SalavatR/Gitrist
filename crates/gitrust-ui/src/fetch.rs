@@ -314,6 +314,79 @@ pub(crate) async fn post_resolve(path: &str, file: &str, side: &str) -> Result<(
     .await
 }
 
+#[cfg(target_arch = "wasm32")]
+pub(crate) async fn post_rebase(path: &str, upstream: &str) -> Result<NetworkOpResult, String> {
+    post_with_response(
+        "/api/repo/rebase",
+        serde_json::json!({ "path": path, "upstream": upstream }),
+    )
+    .await
+}
+
+#[cfg(target_arch = "wasm32")]
+pub(crate) async fn post_rebase_abort(path: &str) -> Result<(), String> {
+    post_empty(
+        "/api/repo/rebase/abort",
+        serde_json::json!({ "path": path }),
+    )
+    .await
+}
+
+#[cfg(target_arch = "wasm32")]
+pub(crate) async fn post_rebase_continue(path: &str) -> Result<(), String> {
+    post_empty(
+        "/api/repo/rebase/continue",
+        serde_json::json!({ "path": path }),
+    )
+    .await
+}
+
+#[cfg(target_arch = "wasm32")]
+pub(crate) async fn post_rebase_skip(path: &str) -> Result<(), String> {
+    post_empty("/api/repo/rebase/skip", serde_json::json!({ "path": path })).await
+}
+
+#[cfg(target_arch = "wasm32")]
+pub(crate) async fn post_revert(path: &str, oid: &str) -> Result<NetworkOpResult, String> {
+    post_with_response(
+        "/api/repo/revert",
+        serde_json::json!({ "path": path, "oid": oid }),
+    )
+    .await
+}
+
+#[cfg(target_arch = "wasm32")]
+pub(crate) async fn post_revert_abort(path: &str) -> Result<(), String> {
+    post_empty(
+        "/api/repo/revert/abort",
+        serde_json::json!({ "path": path }),
+    )
+    .await
+}
+
+#[cfg(target_arch = "wasm32")]
+pub(crate) async fn post_revert_continue(path: &str) -> Result<(), String> {
+    post_empty(
+        "/api/repo/revert/continue",
+        serde_json::json!({ "path": path }),
+    )
+    .await
+}
+
+#[cfg(target_arch = "wasm32")]
+pub(crate) async fn post_revert_skip(path: &str) -> Result<(), String> {
+    post_empty("/api/repo/revert/skip", serde_json::json!({ "path": path })).await
+}
+
+#[cfg(target_arch = "wasm32")]
+pub(crate) async fn post_reset(path: &str, target: &str, mode: &str) -> Result<(), String> {
+    post_empty(
+        "/api/repo/reset",
+        serde_json::json!({ "path": path, "target": target, "mode": mode }),
+    )
+    .await
+}
+
 /// Pops the native folder picker on the server side (via `rfd`) and
 /// returns the chosen path. `Ok(None)` means the user cancelled. Only
 /// works against a server built with `--features desktop`; vanilla
@@ -651,5 +724,50 @@ pub(crate) async fn post_cherry_pick_continue(_path: &str) -> Result<(), String>
 
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) async fn post_resolve(_path: &str, _file: &str, _side: &str) -> Result<(), String> {
+    Err("native build: writes not implemented".into())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) async fn post_rebase(_path: &str, _upstream: &str) -> Result<NetworkOpResult, String> {
+    Err("native build: writes not implemented".into())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) async fn post_rebase_abort(_path: &str) -> Result<(), String> {
+    Err("native build: writes not implemented".into())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) async fn post_rebase_continue(_path: &str) -> Result<(), String> {
+    Err("native build: writes not implemented".into())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) async fn post_rebase_skip(_path: &str) -> Result<(), String> {
+    Err("native build: writes not implemented".into())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) async fn post_revert(_path: &str, _oid: &str) -> Result<NetworkOpResult, String> {
+    Err("native build: writes not implemented".into())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) async fn post_revert_abort(_path: &str) -> Result<(), String> {
+    Err("native build: writes not implemented".into())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) async fn post_revert_continue(_path: &str) -> Result<(), String> {
+    Err("native build: writes not implemented".into())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) async fn post_revert_skip(_path: &str) -> Result<(), String> {
+    Err("native build: writes not implemented".into())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) async fn post_reset(_path: &str, _target: &str, _mode: &str) -> Result<(), String> {
     Err("native build: writes not implemented".into())
 }

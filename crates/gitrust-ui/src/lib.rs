@@ -109,6 +109,7 @@ fn AppContent() -> Element {
     let blob_query = use_signal(String::new);
     let mut net_busy = use_signal(|| false);
     let mut net_result = use_signal(|| None::<Result<NetworkOpResult, String>>);
+    let mut reset_mode = use_signal(|| "mixed".to_string());
 
     use_effect(move || persist_log_all(*log_all.read()));
 
@@ -431,6 +432,8 @@ fn AppContent() -> Element {
                         let n = rs.conflicted.len();
                         let kind_for_abort = kind.clone();
                         let kind_for_continue = kind.clone();
+                        let kind_for_skip = kind.clone();
+                        let supports_skip = kind == "rebasing" || kind == "reverting";
                         rsx! {
                             div { class: "merge-banner",
                                 div { class: "merge-banner-head",
@@ -457,10 +460,11 @@ fn AppContent() -> Element {
                                             net_busy.set(true);
                                             net_result.set(None);
                                             spawn(async move {
-                                                let r = if kind == "merging" {
-                                                    fetch::post_merge_abort(&path).await
-                                                } else {
-                                                    fetch::post_cherry_pick_abort(&path).await
+                                                let r = match kind.as_str() {
+                                                    "merging" => fetch::post_merge_abort(&path).await,
+                                                    "rebasing" => fetch::post_rebase_abort(&path).await,
+                                                    "reverting" => fetch::post_revert_abort(&path).await,
+                                                    _ => fetch::post_cherry_pick_abort(&path).await,
                                                 };
                                                 net_busy.set(false);
                                                 match r {
@@ -472,13 +476,39 @@ fn AppContent() -> Element {
                                         },
                                         "Abort"
                                     }
+                                    if supports_skip {
+                                        button {
+                                            class: "merge-action",
+                                            disabled: busy,
+                                            title: "Drop the commit currently being applied and continue with the next one",
+                                            onclick: move |_| {
+                                                let path = current_repo.read().clone();
+                                                let kind = kind_for_skip.clone();
+                                                net_busy.set(true);
+                                                net_result.set(None);
+                                                spawn(async move {
+                                                    let r = match kind.as_str() {
+                                                        "rebasing" => fetch::post_rebase_skip(&path).await,
+                                                        _ => fetch::post_revert_skip(&path).await,
+                                                    };
+                                                    net_busy.set(false);
+                                                    match r {
+                                                        Ok(()) => net_result.set(None),
+                                                        Err(e) => net_result.set(Some(Err(e))),
+                                                    }
+                                                    state.restart();
+                                                });
+                                            },
+                                            "Skip"
+                                        }
+                                    }
                                     button {
                                         class: "merge-action primary",
                                         disabled: busy || n > 0,
                                         title: if n > 0 {
                                             "Resolve all conflicts first"
                                         } else {
-                                            "Finalize with the staged merge message"
+                                            "Finalize with the staged commit message"
                                         },
                                         onclick: move |_| {
                                             let path = current_repo.read().clone();
@@ -486,10 +516,11 @@ fn AppContent() -> Element {
                                             net_busy.set(true);
                                             net_result.set(None);
                                             spawn(async move {
-                                                let r = if kind == "merging" {
-                                                    fetch::post_merge_continue(&path).await
-                                                } else {
-                                                    fetch::post_cherry_pick_continue(&path).await
+                                                let r = match kind.as_str() {
+                                                    "merging" => fetch::post_merge_continue(&path).await,
+                                                    "rebasing" => fetch::post_rebase_continue(&path).await,
+                                                    "reverting" => fetch::post_revert_continue(&path).await,
+                                                    _ => fetch::post_cherry_pick_continue(&path).await,
                                                 };
                                                 net_busy.set(false);
                                                 match r {
@@ -769,6 +800,10 @@ fn AppContent() -> Element {
                                     let busy = *net_busy.read();
                                     let oid_for_merge = oid.clone();
                                     let oid_for_pick = oid.clone();
+                                    let oid_for_rebase = oid.clone();
+                                    let oid_for_revert = oid.clone();
+                                    let oid_for_reset = oid.clone();
+                                    let short_for_reset = short.clone();
                                     rsx! {
                                         div { class: "commit-actions",
                                             button {
@@ -784,6 +819,7 @@ fn AppContent() -> Element {
                                                         let r = fetch::post_merge(&path, &target, false).await;
                                                         net_busy.set(false);
                                                         net_result.set(Some(r));
+                                                        state.restart();
                                                     });
                                                 },
                                                 "Merge into {current_branch}"
@@ -801,9 +837,84 @@ fn AppContent() -> Element {
                                                         let r = fetch::post_cherry_pick(&path, &target).await;
                                                         net_busy.set(false);
                                                         net_result.set(Some(r));
+                                                        state.restart();
                                                     });
                                                 },
                                                 "Cherry-pick"
+                                            }
+                                            button {
+                                                class: "commit-action",
+                                                disabled: busy,
+                                                title: "git rebase {short} (replay {current_branch} onto this commit)",
+                                                onclick: move |_| {
+                                                    let path = current_repo.read().clone();
+                                                    let upstream = oid_for_rebase.clone();
+                                                    net_busy.set(true);
+                                                    net_result.set(None);
+                                                    spawn(async move {
+                                                        let r = fetch::post_rebase(&path, &upstream).await;
+                                                        net_busy.set(false);
+                                                        net_result.set(Some(r));
+                                                        state.restart();
+                                                    });
+                                                },
+                                                "Rebase onto"
+                                            }
+                                            button {
+                                                class: "commit-action",
+                                                disabled: busy,
+                                                title: "git revert {short} (creates a new commit that inverts this one)",
+                                                onclick: move |_| {
+                                                    let path = current_repo.read().clone();
+                                                    let oid = oid_for_revert.clone();
+                                                    net_busy.set(true);
+                                                    net_result.set(None);
+                                                    spawn(async move {
+                                                        let r = fetch::post_revert(&path, &oid).await;
+                                                        net_busy.set(false);
+                                                        net_result.set(Some(r));
+                                                        state.restart();
+                                                    });
+                                                },
+                                                "Revert"
+                                            }
+                                            select {
+                                                class: "reset-mode",
+                                                value: "{reset_mode}",
+                                                title: "Reset mode — soft keeps stage+worktree, mixed keeps worktree only, hard discards everything.",
+                                                onchange: move |e| reset_mode.set(e.value()),
+                                                option { value: "soft", "soft" }
+                                                option { value: "mixed", "mixed" }
+                                                option { value: "hard", "hard" }
+                                            }
+                                            button {
+                                                class: "commit-action",
+                                                disabled: busy,
+                                                title: "git reset --{reset_mode} {short_for_reset}",
+                                                onclick: move |_| {
+                                                    let path = current_repo.read().clone();
+                                                    let target = oid_for_reset.clone();
+                                                    let mode = reset_mode.read().clone();
+                                                    if mode == "hard"
+                                                        && !sidebar::browser_confirm(
+                                                            "Hard reset discards all uncommitted changes in the worktree and index. Continue?",
+                                                        )
+                                                    {
+                                                        return;
+                                                    }
+                                                    net_busy.set(true);
+                                                    net_result.set(None);
+                                                    spawn(async move {
+                                                        let r = fetch::post_reset(&path, &target, &mode).await;
+                                                        net_busy.set(false);
+                                                        match r {
+                                                            Ok(()) => net_result.set(None),
+                                                            Err(e) => net_result.set(Some(Err(e))),
+                                                        }
+                                                        state.restart();
+                                                    });
+                                                },
+                                                "Reset"
                                             }
                                         }
                                     }

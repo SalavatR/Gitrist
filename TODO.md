@@ -216,6 +216,24 @@ within each section.
       arrives within the debounce window. UI snapshot tests not
       yet (no Dioxus story support that I've found).
 
+## History rewriters
+
+- [x] `rebase` / `revert` / `reset` — three core functions, nine
+      server endpoints (`POST /api/repo/{rebase,revert,reset}` plus
+      `/{abort,continue,skip}` for rebase and revert). UI surfaces
+      them as buttons next to Merge / Cherry-pick in the commit-
+      detail toolbar, so the user picks the target oid by clicking
+      a commit in the graph. Reset gets a small `<select>` for
+      `soft` / `mixed` / `hard` and confirms via `window.confirm`
+      on `hard`. `repo_state` was extended to detect `.git/rebase-
+      merge/` and `.git/REVERT_HEAD` and report `kind = "rebasing"`
+      / `"reverting"`; the existing conflict banner generalised to
+      kind-aware Abort / Continue / Skip (Skip visible for rebase
+      and revert). `rebase_continue` runs with `GIT_EDITOR=true` so
+      the rebased commit's existing message is reused without
+      blocking on an editor. Seven new tempdir integration tests
+      cover the clean and conflict paths plus reset's three modes.
+
 ## History movers
 
 - [x] `merge` + `cherry-pick` via the user's `git` binary. Core

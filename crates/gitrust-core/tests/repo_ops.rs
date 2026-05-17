@@ -1096,3 +1096,175 @@ fn cherry_pick_abort_clears_the_in_progress_state() {
     let after = gitrust_core::repo_state(r.path()).expect("state");
     assert_eq!(after.kind, "clean");
 }
+
+#[test]
+fn rebase_replays_branch_onto_upstream() {
+    let r = TestRepo::new();
+    r.write("a", "1\n");
+    r.git(&["add", "a"]);
+    r.git(&["commit", "-q", "-m", "base"]);
+
+    // master advances independently; feature carries one commit off the base.
+    r.git(&["checkout", "-q", "-b", "feature"]);
+    r.write("b", "feature-only\n");
+    r.git(&["add", "b"]);
+    r.git(&["commit", "-q", "-m", "feature: add b"]);
+    r.git(&["checkout", "-q", "master"]);
+    r.write("a", "2\n");
+    r.git(&["add", "a"]);
+    r.git(&["commit", "-q", "-m", "master: edit a"]);
+    let new_master = r.git(&["rev-parse", "HEAD"]).trim().to_string();
+
+    r.git(&["checkout", "-q", "feature"]);
+    gitrust_core::rebase(r.path(), "master").expect("rebase");
+
+    // After rebase feature's parent is master's HEAD.
+    let parent = r.git(&["rev-parse", "HEAD~1"]).trim().to_string();
+    assert_eq!(parent, new_master);
+    // And the worktree carries both files.
+    assert_eq!(std::fs::read_to_string(r.path().join("a")).unwrap(), "2\n");
+    assert_eq!(
+        std::fs::read_to_string(r.path().join("b")).unwrap(),
+        "feature-only\n"
+    );
+
+    let state = gitrust_core::repo_state(r.path()).expect("state");
+    assert_eq!(state.kind, "clean");
+}
+
+#[test]
+fn rebase_conflict_reports_rebasing_and_aborts_cleanly() {
+    let r = TestRepo::new();
+    r.write("a", "base\n");
+    r.git(&["add", "a"]);
+    r.git(&["commit", "-q", "-m", "base"]);
+    r.git(&["checkout", "-q", "-b", "feature"]);
+    r.write("a", "feature\n");
+    r.git(&["add", "a"]);
+    r.git(&["commit", "-q", "-m", "feature edits a"]);
+    r.git(&["checkout", "-q", "master"]);
+    r.write("a", "master\n");
+    r.git(&["add", "a"]);
+    r.git(&["commit", "-q", "-m", "master edits a"]);
+
+    r.git(&["checkout", "-q", "feature"]);
+    let pre_head = r.git(&["rev-parse", "HEAD"]).trim().to_string();
+    let _ = gitrust_core::rebase(r.path(), "master");
+
+    let mid = gitrust_core::repo_state(r.path()).expect("state");
+    assert_eq!(mid.kind, "rebasing");
+    assert_eq!(mid.conflicted, vec!["a".to_string()]);
+
+    gitrust_core::rebase_abort(r.path()).expect("abort");
+    let after = gitrust_core::repo_state(r.path()).expect("state");
+    assert_eq!(after.kind, "clean");
+    // feature's HEAD restored to what it was before the rebase.
+    assert_eq!(r.git(&["rev-parse", "HEAD"]).trim(), pre_head);
+}
+
+#[test]
+fn revert_creates_inverse_commit() {
+    let r = TestRepo::new();
+    // Each commit touches a distinct file so reverting the middle one
+    // doesn't conflict with the later commits.
+    r.write("a", "a\n");
+    r.git(&["add", "a"]);
+    r.git(&["commit", "-q", "-m", "add a"]);
+    r.write("b", "b\n");
+    r.git(&["add", "b"]);
+    r.git(&["commit", "-q", "-m", "add b"]);
+    let to_revert = r.git(&["rev-parse", "HEAD"]).trim().to_string();
+    r.write("c", "c\n");
+    r.git(&["add", "c"]);
+    r.git(&["commit", "-q", "-m", "add c"]);
+
+    let result = gitrust_core::revert(r.path(), &to_revert).expect("revert");
+    assert_eq!(result.op, "revert");
+    assert_eq!(result.remote, to_revert);
+
+    let head_msg = r.git(&["log", "-1", "--format=%s"]).trim().to_string();
+    assert!(
+        head_msg.contains("Revert") && head_msg.contains("add b"),
+        "expected Revert message, got `{head_msg}`"
+    );
+    assert!(!r.path().join("b").exists(), "b should be reverted away");
+    assert!(r.path().join("a").exists());
+    assert!(r.path().join("c").exists());
+    let state = gitrust_core::repo_state(r.path()).expect("state");
+    assert_eq!(state.kind, "clean");
+}
+
+#[test]
+fn revert_abort_clears_in_progress_state() {
+    let r = TestRepo::new();
+    r.write("a", "base\n");
+    r.git(&["add", "a"]);
+    r.git(&["commit", "-q", "-m", "base"]);
+    r.write("a", "second\n");
+    r.git(&["add", "a"]);
+    r.git(&["commit", "-q", "-m", "second"]);
+    let to_revert = r.git(&["rev-parse", "HEAD"]).trim().to_string();
+    // Subsequent edit conflicts with reverting "second": the revert
+    // would re-introduce "base" but the file is now "third".
+    r.write("a", "third\n");
+    r.git(&["add", "a"]);
+    r.git(&["commit", "-q", "-m", "third"]);
+
+    let _ = gitrust_core::revert(r.path(), &to_revert);
+    let mid = gitrust_core::repo_state(r.path()).expect("state");
+    assert_eq!(mid.kind, "reverting");
+
+    gitrust_core::revert_abort(r.path()).expect("abort");
+    let after = gitrust_core::repo_state(r.path()).expect("state");
+    assert_eq!(after.kind, "clean");
+}
+
+#[test]
+fn reset_soft_moves_head_keeps_index_and_worktree() {
+    let r = TestRepo::new();
+    r.write("a", "v1\n");
+    r.git(&["add", "a"]);
+    r.git(&["commit", "-q", "-m", "first"]);
+    let first = r.git(&["rev-parse", "HEAD"]).trim().to_string();
+    r.write("a", "v2\n");
+    r.git(&["add", "a"]);
+    r.git(&["commit", "-q", "-m", "second"]);
+
+    gitrust_core::reset(r.path(), &first, "soft").expect("reset");
+    assert_eq!(r.git(&["rev-parse", "HEAD"]).trim(), first);
+    // Soft: worktree still has v2, and the second commit's change is
+    // staged in the index (diff --cached against HEAD shows it).
+    assert_eq!(std::fs::read_to_string(r.path().join("a")).unwrap(), "v2\n");
+    let staged = gitrust_core::list_staged(r.path()).expect("staged");
+    assert!(staged.iter().any(|e| e.path == "a"));
+}
+
+#[test]
+fn reset_hard_discards_worktree_changes() {
+    let r = TestRepo::new();
+    r.write("a", "v1\n");
+    r.git(&["add", "a"]);
+    r.git(&["commit", "-q", "-m", "first"]);
+    let first = r.git(&["rev-parse", "HEAD"]).trim().to_string();
+    r.write("a", "v2\n");
+    r.git(&["add", "a"]);
+    r.git(&["commit", "-q", "-m", "second"]);
+
+    gitrust_core::reset(r.path(), &first, "hard").expect("reset --hard");
+    assert_eq!(r.git(&["rev-parse", "HEAD"]).trim(), first);
+    // Hard: worktree reverted to v1, nothing staged.
+    assert_eq!(std::fs::read_to_string(r.path().join("a")).unwrap(), "v1\n");
+    let staged = gitrust_core::list_staged(r.path()).expect("staged");
+    assert!(staged.is_empty());
+}
+
+#[test]
+fn reset_rejects_unknown_mode() {
+    let r = TestRepo::new();
+    r.write("a", "x");
+    r.git(&["add", "a"]);
+    r.git(&["commit", "-q", "-m", "init"]);
+    let err = gitrust_core::reset(r.path(), "HEAD", "wobbly").expect_err("bad mode");
+    let msg = err.to_string();
+    assert!(msg.contains("soft") && msg.contains("hard"));
+}
