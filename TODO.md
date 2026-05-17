@@ -216,6 +216,40 @@ within each section.
       arrives within the debounce window. UI snapshot tests not
       yet (no Dioxus story support that I've found).
 
+## History movers
+
+- [x] `merge` + `cherry-pick` via the user's `git` binary. Core
+      functions `gitrust_core::merge(target, no_ff)` and
+      `gitrust_core::cherry_pick(oid)` shell out and return the
+      shared `NetworkOpResult` shape. Server exposes them as
+      `POST /api/repo/{merge,cherry-pick}`. UI surfaces both as
+      buttons in the commit-detail toolbar — visible only when a
+      commit is selected — so picking the target from the graph
+      is the natural flow. Labels read "Merge into {current_branch}"
+      and "Cherry-pick", and the result banner under the topbar
+      surfaces git's own output verbatim (including conflict
+      messages — `run_git` now folds stdout into the error string
+      since `git merge` writes its "CONFLICT (content): …" line to
+      stdout, not stderr). Conflict UI is a separate milestone;
+      for now the user resolves via the CLI.
+
+## Log view
+
+- [x] `log_commits` grew an `all: bool` flag; the server endpoint
+      accepts `?all=true` and `fetch_log` plumbs it through. UI
+      shows an "All branches" checkbox next to the history filter,
+      persisted in `localStorage["gitrust.log_all"]`. The walk uses
+      gix's `rev_walk(tips)` with `Sorting::ByCommitTime(NewestFirst)`
+      over every local + remote-tracking branch tip (HEAD too, in
+      case it's detached). Combined with the graph algorithm
+      (already handles unrelated-tip lanes via the `first_free_or_push`
+      branch), turns the log into a `git log --all --graph` view.
+- [x] History block scrolls internally (`max-height: 60vh; flex:1;
+      overflow-y: auto`) and `LOG_LIMIT` is bumped from 50 → 500 so
+      the user has deep history to scroll without paging. The
+      summary-card / commit-form / detail-panel stay on screen
+      around it.
+
 ## Network ops
 
 - [x] `fetch` / `pull` / `push` via the user's `git` binary. Core

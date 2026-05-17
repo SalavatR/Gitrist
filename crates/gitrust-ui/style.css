@@ -559,6 +559,44 @@ details.tree-folder summary.tree-folder-row::-webkit-details-marker { display: n
   outline: none;
   border-color: var(--accent);
 }
+.all-branches-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.8rem;
+  color: var(--text-2);
+  cursor: pointer;
+  user-select: none;
+}
+.all-branches-toggle input {
+  margin: 0;
+  cursor: pointer;
+}
+.commit-actions {
+  display: inline-flex;
+  gap: 0.3rem;
+  margin-left: auto;
+  margin-right: 0.5rem;
+}
+.commit-action {
+  padding: 0.35rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  color: var(--text-2);
+  cursor: pointer;
+  font-size: 0.8rem;
+  font-weight: 500;
+}
+.commit-action:hover:not(:disabled) {
+  background: var(--accent-bg);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.commit-action:disabled {
+  opacity: 0.5;
+  cursor: progress;
+}
 .history-search {
   flex: 0 1 22rem;
   padding: 0.3rem 0.6rem;
@@ -664,6 +702,20 @@ details.tree-folder summary.tree-folder-row::-webkit-details-marker { display: n
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow);
   padding: 0.85rem 1rem 1rem;
+}
+.main-block.scroll-log {
+  /* History block grows to a sensible chunk of the viewport with its
+   * own internal scrollbar, so 500 commits don't push the diff panel
+   * off the bottom of the page. */
+  display: flex;
+  flex-direction: column;
+  max-height: 60vh;
+  min-height: 18rem;
+}
+.main-block.scroll-log .log-scroll {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
 }
 .main-block h2 {
   margin: 0 0 0.6rem;

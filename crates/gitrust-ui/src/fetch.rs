@@ -26,13 +26,15 @@ pub(crate) async fn fetch_log(
     path: &str,
     limit: usize,
     query: &str,
+    all: bool,
 ) -> Result<Vec<CommitInfo>, String> {
-    let base = format!("/api/repo/log?path={}&limit={limit}", q(path));
-    let url = if query.trim().is_empty() {
-        base
-    } else {
-        format!("{base}&q={}", q(query.trim()))
-    };
+    let mut url = format!("/api/repo/log?path={}&limit={limit}", q(path));
+    if all {
+        url.push_str("&all=true");
+    }
+    if !query.trim().is_empty() {
+        url.push_str(&format!("&q={}", q(query.trim())));
+    }
     fetch_json(&url).await
 }
 
@@ -244,6 +246,28 @@ pub(crate) async fn post_push(
     post_with_response("/api/repo/push", body).await
 }
 
+#[cfg(target_arch = "wasm32")]
+pub(crate) async fn post_merge(
+    path: &str,
+    target: &str,
+    no_ff: bool,
+) -> Result<NetworkOpResult, String> {
+    post_with_response(
+        "/api/repo/merge",
+        serde_json::json!({ "path": path, "target": target, "no_ff": no_ff }),
+    )
+    .await
+}
+
+#[cfg(target_arch = "wasm32")]
+pub(crate) async fn post_cherry_pick(path: &str, oid: &str) -> Result<NetworkOpResult, String> {
+    post_with_response(
+        "/api/repo/cherry-pick",
+        serde_json::json!({ "path": path, "oid": oid }),
+    )
+    .await
+}
+
 /// Pops the native folder picker on the server side (via `rfd`) and
 /// returns the chosen path. `Ok(None)` means the user cancelled. Only
 /// works against a server built with `--features desktop`; vanilla
@@ -380,6 +404,7 @@ pub(crate) async fn fetch_log(
     _path: &str,
     _limit: usize,
     _query: &str,
+    _all: bool,
 ) -> Result<Vec<CommitInfo>, String> {
     Err("native build: fetching not implemented".into())
 }
@@ -536,5 +561,19 @@ pub(crate) async fn post_push(
     _force_with_lease: bool,
     _set_upstream: bool,
 ) -> Result<NetworkOpResult, String> {
+    Err("native build: writes not implemented".into())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) async fn post_merge(
+    _path: &str,
+    _target: &str,
+    _no_ff: bool,
+) -> Result<NetworkOpResult, String> {
+    Err("native build: writes not implemented".into())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) async fn post_cherry_pick(_path: &str, _oid: &str) -> Result<NetworkOpResult, String> {
     Err("native build: writes not implemented".into())
 }

@@ -715,6 +715,39 @@ omit both to let git use the current branch's tracked upstream. Flags:
   of `--force` that refuses to overwrite refs the local side hasn't
   seen yet.
 
+### `POST /api/repo/merge`
+
+```json
+{ "path": "...", "target": "feature", "no_ff": false }
+```
+
+`target` is anything `git merge` accepts: branch name, tag, or commit
+oid. `no_ff: true` forces a merge commit even when fast-forward would
+work (mirrors `git merge --no-ff`). On conflict the response is the
+standard error envelope with git's own "CONFLICT (content): Merge
+conflict in …" wording in `error`; the worktree is left in the
+partially-merged state for the user to resolve via the CLI (conflict
+UI is a separate milestone).
+
+### `POST /api/repo/cherry-pick`
+
+```json
+{ "path": "...", "oid": "85ea44373cc77f401b5ea4fc665c08e8c026fbe4" }
+```
+
+Applies the changes from `oid` on top of the current branch as a new
+commit (`git cherry-pick`). Conflict behaviour mirrors `merge`: the
+error envelope carries git's "could not apply …" wording and the
+worktree is left mid-pick.
+
+### `GET /api/repo/log?path=<path>&limit=<N>&q=<filter>&all=<bool>`
+
+The existing log endpoint grew an `all` flag. `all=true` walks every
+local + remote-tracking branch tip and merges them into one
+newest-first stream (`git log --all`); the default `false` walks only
+HEAD's ancestors. The optional `q` substring filter still applies in
+both modes.
+
 ### `POST /api/repo/pick-folder` (desktop only)
 
 Pops the OS-native folder picker (`NSOpenPanel` on macOS, the

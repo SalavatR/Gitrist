@@ -28,8 +28,9 @@ use sidebar::{
 };
 use state::{
     AUTH_TOKEN, BlobSelection, LOG_LIMIT, REFS_POLL_INTERVAL_MS, STATUS_POLL_INTERVAL_MS,
-    ThemeMode, apply_theme, clear_auth_token, initial_repo, initial_side_by_side, initial_theme,
-    persist_auth_token, persist_repo, persist_side_by_side, recent_repos, record_recent_repo,
+    ThemeMode, apply_theme, clear_auth_token, initial_log_all, initial_repo, initial_side_by_side,
+    initial_theme, persist_auth_token, persist_log_all, persist_repo, persist_side_by_side,
+    recent_repos, record_recent_repo,
 };
 use time_fmt::sleep_ms;
 
@@ -104,9 +105,12 @@ fn AppContent() -> Element {
     let commit_author = use_signal(String::new);
     let new_branch = use_signal(String::new);
     let mut log_query = use_signal(String::new);
+    let mut log_all = use_signal(initial_log_all);
     let blob_query = use_signal(String::new);
     let mut net_busy = use_signal(|| false);
     let mut net_result = use_signal(|| None::<Result<NetworkOpResult, String>>);
+
+    use_effect(move || persist_log_all(*log_all.read()));
 
     use_effect(move || {
         let path = current_repo.read().clone();
@@ -130,7 +134,8 @@ fn AppContent() -> Element {
     let mut log = use_resource(move || {
         let path = current_repo.read().clone();
         let q = log_query.read().clone();
-        async move { fetch_log(&path, LOG_LIMIT, &q).await }
+        let all = *log_all.read();
+        async move { fetch_log(&path, LOG_LIMIT, &q, all).await }
     });
     let mut status = use_resource(move || {
         let path = current_repo.read().clone();
@@ -548,9 +553,18 @@ fn AppContent() -> Element {
                         )
                     }
 
-                    section { class: "main-block",
+                    section { class: "main-block scroll-log",
                         div { class: "block-toolbar",
                             h2 { style: "margin: 0;", "History" }
+                            label { class: "all-branches-toggle",
+                                title: "Walk every ref tip — local + remote-tracking branches — instead of just HEAD's ancestors.",
+                                input {
+                                    r#type: "checkbox",
+                                    checked: *log_all.read(),
+                                    oninput: move |e| log_all.set(e.value() == "true"),
+                                }
+                                span { "All branches" }
+                            }
                             input {
                                 class: "history-search",
                                 r#type: "search",
@@ -562,16 +576,18 @@ fn AppContent() -> Element {
                                 oninput: move |e| log_query.set(e.value()),
                             }
                         }
-                        {
-                            let show_graph = log_query.read().trim().is_empty();
-                            render_log(
-                                &log.read_unchecked(),
-                                log,
-                                selected_oid,
-                                selected_file,
-                                selected_blob,
-                                show_graph,
-                            )
+                        div { class: "log-scroll",
+                            {
+                                let show_graph = log_query.read().trim().is_empty();
+                                render_log(
+                                    &log.read_unchecked(),
+                                    log,
+                                    selected_oid,
+                                    selected_file,
+                                    selected_blob,
+                                    show_graph,
+                                )
+                            }
                         }
                     }
 
@@ -581,6 +597,71 @@ fn AppContent() -> Element {
                                 if selected_blob.read().is_some() { "File viewer" }
                                 else if selected_file.read().is_some() { "Working tree change" }
                                 else { "Commit detail" }
+                            }
+                            {
+                                // Merge / cherry-pick buttons appear only
+                                // when a commit is selected (not a blob /
+                                // working-tree file). They target HEAD's
+                                // current branch — we read the branch
+                                // name out of the summary signal for the
+                                // label so the user knows where the work
+                                // is landing.
+                                let oid = selected_oid.read().clone();
+                                let on_commit = oid.is_some()
+                                    && selected_file.read().is_none()
+                                    && selected_blob.read().is_none();
+                                if let (true, Some(oid)) = (on_commit, oid) {
+                                    let short: String = oid.chars().take(8).collect();
+                                    let current_branch = summary
+                                        .read_unchecked()
+                                        .as_ref()
+                                        .and_then(|r| r.as_ref().ok())
+                                        .and_then(|s| s.head_ref.clone())
+                                        .unwrap_or_else(|| "HEAD".into());
+                                    let busy = *net_busy.read();
+                                    let oid_for_merge = oid.clone();
+                                    let oid_for_pick = oid.clone();
+                                    rsx! {
+                                        div { class: "commit-actions",
+                                            button {
+                                                class: "commit-action",
+                                                disabled: busy,
+                                                title: "git merge {short} (creates a merge commit unless ff is possible)",
+                                                onclick: move |_| {
+                                                    let path = current_repo.read().clone();
+                                                    let target = oid_for_merge.clone();
+                                                    net_busy.set(true);
+                                                    net_result.set(None);
+                                                    spawn(async move {
+                                                        let r = fetch::post_merge(&path, &target, false).await;
+                                                        net_busy.set(false);
+                                                        net_result.set(Some(r));
+                                                    });
+                                                },
+                                                "Merge into {current_branch}"
+                                            }
+                                            button {
+                                                class: "commit-action",
+                                                disabled: busy,
+                                                title: "git cherry-pick {short}",
+                                                onclick: move |_| {
+                                                    let path = current_repo.read().clone();
+                                                    let target = oid_for_pick.clone();
+                                                    net_busy.set(true);
+                                                    net_result.set(None);
+                                                    spawn(async move {
+                                                        let r = fetch::post_cherry_pick(&path, &target).await;
+                                                        net_busy.set(false);
+                                                        net_result.set(Some(r));
+                                                    });
+                                                },
+                                                "Cherry-pick"
+                                            }
+                                        }
+                                    }
+                                } else {
+                                    rsx! {}
+                                }
                             }
                             if selected_blob.read().is_none() {
                                 button {

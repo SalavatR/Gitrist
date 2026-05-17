@@ -17,11 +17,11 @@ use tower_http::trace::TraceLayer;
 use gitrust_core::{
     BlameView, BlobView, BranchInfo, CommitDiff, CommitInfo, FileDiff, NetworkOpResult,
     RemoteBranchInfo, RepoSummary, StashEntry, StatusEntry, TagInfo, TreeEntry, blame_file,
-    checkout as core_checkout, commit as core_commit, commit_info,
+    checkout as core_checkout, cherry_pick as core_cherry_pick, commit as core_commit, commit_info,
     create_branch as core_create_branch, delete_branch as core_delete_branch, diff_commit,
     diff_working, discard_files, fetch as core_fetch, list_branches, list_remote_branches,
-    list_staged, list_status, list_tags, list_tree, log_commits, pull as core_pull,
-    push as core_push, rename_branch as core_rename_branch, show_blob,
+    list_staged, list_status, list_tags, list_tree, log_commits, merge as core_merge,
+    pull as core_pull, push as core_push, rename_branch as core_rename_branch, show_blob,
     stage_files as core_stage_files, stash_drop as core_stash_drop, stash_list as core_stash_list,
     stash_pop as core_stash_pop, stash_save as core_stash_save, summarize_repo,
     unstage_files as core_unstage,
@@ -47,6 +47,10 @@ struct LogQuery {
     /// Case-insensitive. When absent or empty the log is unfiltered.
     #[serde(default)]
     q: Option<String>,
+    /// `true` walks every ref tip (`git log --all`); `false` walks only
+    /// HEAD's ancestors. Default `false` keeps backward compatibility.
+    #[serde(default)]
+    all: bool,
 }
 
 fn default_limit() -> usize {
@@ -67,7 +71,7 @@ async fn repo_summary(Query(q): Query<PathQuery>) -> Result<Json<RepoSummary>, A
 
 async fn repo_log(Query(q): Query<LogQuery>) -> Result<Json<Vec<CommitInfo>>, ApiError> {
     let path = PathBuf::from(q.path);
-    log_commits(&path, q.limit.min(500), q.q.as_deref())
+    log_commits(&path, q.limit.min(500), q.q.as_deref(), q.all)
         .map(Json)
         .map_err(ApiError::from)
 }
@@ -397,6 +401,47 @@ struct PushBody {
     force_with_lease: bool,
     #[serde(default)]
     set_upstream: bool,
+}
+
+#[derive(Deserialize)]
+struct MergeBody {
+    path: String,
+    /// Branch name, tag, or commit oid to merge into the current branch.
+    target: String,
+    #[serde(default)]
+    no_ff: bool,
+}
+
+async fn repo_merge(Json(body): Json<MergeBody>) -> Result<Json<NetworkOpResult>, ApiError> {
+    let MergeBody {
+        path,
+        target,
+        no_ff,
+    } = body;
+    let repo = PathBuf::from(path);
+    let result = tokio::task::spawn_blocking(move || core_merge(&repo, &target, no_ff))
+        .await
+        .map_err(|e| anyhow::anyhow!("join error: {e}"))?
+        .map_err(ApiError::from)?;
+    Ok(Json(result))
+}
+
+#[derive(Deserialize)]
+struct CherryPickBody {
+    path: String,
+    oid: String,
+}
+
+async fn repo_cherry_pick(
+    Json(body): Json<CherryPickBody>,
+) -> Result<Json<NetworkOpResult>, ApiError> {
+    let CherryPickBody { path, oid } = body;
+    let repo = PathBuf::from(path);
+    let result = tokio::task::spawn_blocking(move || core_cherry_pick(&repo, &oid))
+        .await
+        .map_err(|e| anyhow::anyhow!("join error: {e}"))?
+        .map_err(ApiError::from)?;
+    Ok(Json(result))
 }
 
 async fn repo_push(Json(body): Json<PushBody>) -> Result<Json<NetworkOpResult>, ApiError> {
@@ -863,7 +908,9 @@ pub fn router(source: WebSource, auth: AuthState) -> Router {
         .route("/repo/checkout", post(repo_checkout))
         .route("/repo/fetch", post(repo_fetch))
         .route("/repo/pull", post(repo_pull))
-        .route("/repo/push", post(repo_push));
+        .route("/repo/push", post(repo_push))
+        .route("/repo/merge", post(repo_merge))
+        .route("/repo/cherry-pick", post(repo_cherry_pick));
 
     #[cfg(feature = "desktop")]
     let protected = protected.route("/repo/pick-folder", post(pick_folder));

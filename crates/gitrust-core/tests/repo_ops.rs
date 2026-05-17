@@ -28,12 +28,12 @@ fn log_returns_commits_newest_first_and_respects_limit() {
         r.git(&["commit", "-q", "-m", &format!("commit-{i}")]);
     }
 
-    let all = gitrust_core::log_commits(r.path(), 10, None).expect("log");
+    let all = gitrust_core::log_commits(r.path(), 10, None, false).expect("log");
     assert_eq!(all.len(), 3);
     assert_eq!(all[0].summary, "commit-3");
     assert_eq!(all[2].summary, "commit-1");
 
-    let two = gitrust_core::log_commits(r.path(), 2, None).expect("log limit");
+    let two = gitrust_core::log_commits(r.path(), 2, None, false).expect("log limit");
     assert_eq!(two.len(), 2);
 }
 
@@ -48,17 +48,18 @@ fn log_filters_on_query_against_summary_and_author() {
         r.git(&["add", "a"]);
         r.git(&["commit", "-q", "-m", msg]);
     }
-    let only_feats = gitrust_core::log_commits(r.path(), 10, Some("feat")).expect("filtered");
+    let only_feats =
+        gitrust_core::log_commits(r.path(), 10, Some("feat"), false).expect("filtered");
     assert_eq!(only_feats.len(), 2);
     assert!(only_feats.iter().all(|c| c.summary.contains("feat")));
 
     // Case-insensitive substring match.
-    let parser = gitrust_core::log_commits(r.path(), 10, Some("PARSER")).expect("ci filter");
+    let parser = gitrust_core::log_commits(r.path(), 10, Some("PARSER"), false).expect("ci filter");
     assert_eq!(parser.len(), 1);
     assert!(parser[0].summary.contains("parser"));
 
     // Empty query falls through to unfiltered.
-    let all = gitrust_core::log_commits(r.path(), 10, Some("   ")).expect("empty q");
+    let all = gitrust_core::log_commits(r.path(), 10, Some("   "), false).expect("empty q");
     assert_eq!(all.len(), 3);
 }
 
@@ -283,7 +284,7 @@ fn commit_creates_new_commit_with_staged_changes() {
     let oid = gitrust_core::commit(r.path(), "second", None).expect("commit");
     assert_eq!(oid.len(), 40);
 
-    let log = gitrust_core::log_commits(r.path(), 10, None).unwrap();
+    let log = gitrust_core::log_commits(r.path(), 10, None, false).unwrap();
     assert_eq!(log.len(), 2);
     assert_eq!(log[0].summary, "second");
     assert_eq!(log[0].oid, oid);
@@ -794,6 +795,156 @@ fn pull_ff_only_refuses_diverged_history() {
                 .to_lowercase()
                 .contains("not possible to fast-forward"),
         "expected ff-only refusal, got `{err}`"
+    );
+}
+
+#[test]
+fn log_all_walks_branches_outside_head_ancestry() {
+    let r = TestRepo::new();
+    r.write("a", "1");
+    r.git(&["add", "a"]);
+    r.git(&["commit", "-q", "-m", "shared base"]);
+
+    // Diverge: create `side` with its own commit, then switch back to
+    // master and land an unrelated commit. The two branches now share
+    // only the base; HEAD's log shows master's commit but not side's.
+    r.git(&["checkout", "-q", "-b", "side"]);
+    r.write("a", "side");
+    r.git(&["add", "a"]);
+    r.git(&["commit", "-q", "-m", "side advances"]);
+    r.git(&["checkout", "-q", "master"]);
+    r.write("a", "master");
+    r.git(&["add", "a"]);
+    r.git(&["commit", "-q", "-m", "master advances"]);
+
+    let head_only = gitrust_core::log_commits(r.path(), 50, None, false).expect("head log");
+    let head_summaries: Vec<&str> = head_only.iter().map(|c| c.summary.as_str()).collect();
+    assert!(head_summaries.contains(&"master advances"));
+    assert!(head_summaries.contains(&"shared base"));
+    assert!(
+        !head_summaries.contains(&"side advances"),
+        "HEAD walk should not include side branch's tip"
+    );
+
+    let all_branches = gitrust_core::log_commits(r.path(), 50, None, true).expect("all log");
+    let all_summaries: Vec<&str> = all_branches.iter().map(|c| c.summary.as_str()).collect();
+    assert!(all_summaries.contains(&"master advances"));
+    assert!(all_summaries.contains(&"side advances"));
+    assert!(all_summaries.contains(&"shared base"));
+}
+
+#[test]
+fn merge_fast_forwards_when_target_is_ahead() {
+    let r = TestRepo::new();
+    r.write("a", "1");
+    r.git(&["add", "a"]);
+    r.git(&["commit", "-q", "-m", "base"]);
+    r.git(&["checkout", "-q", "-b", "feature"]);
+    r.write("a", "2");
+    r.git(&["add", "a"]);
+    r.git(&["commit", "-q", "-m", "feature advances"]);
+    let feature_head = r.git(&["rev-parse", "HEAD"]).trim().to_string();
+    r.git(&["checkout", "-q", "master"]);
+
+    let result = gitrust_core::merge(r.path(), "feature", false).expect("merge");
+    assert_eq!(result.op, "merge");
+    assert_eq!(result.remote, "feature");
+    let new_master = r.git(&["rev-parse", "HEAD"]).trim().to_string();
+    assert_eq!(new_master, feature_head);
+}
+
+#[test]
+fn merge_no_ff_creates_merge_commit() {
+    let r = TestRepo::new();
+    r.write("a", "1");
+    r.git(&["add", "a"]);
+    r.git(&["commit", "-q", "-m", "base"]);
+    r.git(&["checkout", "-q", "-b", "feature"]);
+    r.write("a", "2");
+    r.git(&["add", "a"]);
+    r.git(&["commit", "-q", "-m", "feature advances"]);
+    let feature_head = r.git(&["rev-parse", "HEAD"]).trim().to_string();
+    r.git(&["checkout", "-q", "master"]);
+
+    gitrust_core::merge(r.path(), "feature", true).expect("merge --no-ff");
+    let new_master = r.git(&["rev-parse", "HEAD"]).trim().to_string();
+    assert_ne!(new_master, feature_head, "--no-ff must mint a merge commit");
+    let parents = r.git(&["rev-list", "--parents", "-n", "1", "HEAD"]);
+    assert_eq!(
+        parents.split_whitespace().count(),
+        3,
+        "merge commit should have two parents in addition to its own oid"
+    );
+}
+
+#[test]
+fn merge_reports_conflict_when_branches_collide() {
+    let r = TestRepo::new();
+    r.write("a", "base\n");
+    r.git(&["add", "a"]);
+    r.git(&["commit", "-q", "-m", "base"]);
+    r.git(&["checkout", "-q", "-b", "feature"]);
+    r.write("a", "from feature\n");
+    r.git(&["add", "a"]);
+    r.git(&["commit", "-q", "-m", "feature edits"]);
+    r.git(&["checkout", "-q", "master"]);
+    r.write("a", "from master\n");
+    r.git(&["add", "a"]);
+    r.git(&["commit", "-q", "-m", "master edits"]);
+
+    let err = gitrust_core::merge(r.path(), "feature", false).expect_err("conflicting merge");
+    let msg = err.to_string().to_lowercase();
+    assert!(
+        msg.contains("conflict") || msg.contains("automatic merge failed"),
+        "expected conflict wording, got `{err}`"
+    );
+}
+
+#[test]
+fn cherry_pick_lands_a_commit_from_another_branch() {
+    let r = TestRepo::new();
+    r.write("a", "1\n");
+    r.git(&["add", "a"]);
+    r.git(&["commit", "-q", "-m", "base"]);
+    r.git(&["checkout", "-q", "-b", "feature"]);
+    r.write("b", "feature-only\n");
+    r.git(&["add", "b"]);
+    r.git(&["commit", "-q", "-m", "feature: add b"]);
+    let target_oid = r.git(&["rev-parse", "HEAD"]).trim().to_string();
+    r.git(&["checkout", "-q", "master"]);
+
+    let result = gitrust_core::cherry_pick(r.path(), &target_oid).expect("cherry-pick");
+    assert_eq!(result.op, "cherry-pick");
+    assert_eq!(result.remote, target_oid);
+
+    let head_msg = r.git(&["log", "-1", "--format=%s"]).trim().to_string();
+    assert_eq!(head_msg, "feature: add b");
+    let b_on_master = std::fs::read_to_string(r.path().join("b")).unwrap();
+    assert_eq!(b_on_master, "feature-only\n");
+}
+
+#[test]
+fn cherry_pick_reports_conflict_on_overlapping_edits() {
+    let r = TestRepo::new();
+    r.write("a", "base\n");
+    r.git(&["add", "a"]);
+    r.git(&["commit", "-q", "-m", "base"]);
+    r.git(&["checkout", "-q", "-b", "feature"]);
+    r.write("a", "feature\n");
+    r.git(&["add", "a"]);
+    r.git(&["commit", "-q", "-m", "feature edits a"]);
+    let conflicting_oid = r.git(&["rev-parse", "HEAD"]).trim().to_string();
+    r.git(&["checkout", "-q", "master"]);
+    r.write("a", "master\n");
+    r.git(&["add", "a"]);
+    r.git(&["commit", "-q", "-m", "master edits a"]);
+
+    let err =
+        gitrust_core::cherry_pick(r.path(), &conflicting_oid).expect_err("conflicting cherry-pick");
+    let msg = err.to_string().to_lowercase();
+    assert!(
+        msg.contains("conflict") || msg.contains("could not apply"),
+        "expected conflict wording, got `{err}`"
     );
 }
 

@@ -93,7 +93,11 @@ pub(crate) struct BlobSelection {
 }
 
 pub(crate) const DEFAULT_REPO: &str = "/home/salavat/gitrust";
-pub(crate) const LOG_LIMIT: usize = 50;
+/// How many commits to request per log fetch. The server caps at 500;
+/// we ask for the full cap so users can scroll into deep history
+/// without paginating. The log block is scrollable so the row count
+/// doesn't push the rest of the layout off-screen.
+pub(crate) const LOG_LIMIT: usize = 500;
 pub(crate) const STATUS_POLL_INTERVAL_MS: u32 = 2_000;
 pub(crate) const REFS_POLL_INTERVAL_MS: u32 = 10_000;
 
@@ -109,6 +113,32 @@ const RECENT_REPOS_STORAGE_KEY: &str = "gitrust.repos";
 const RECENT_REPOS_MAX: usize = 8;
 #[cfg(target_arch = "wasm32")]
 const THEME_STORAGE_KEY: &str = "gitrust.theme";
+#[cfg(target_arch = "wasm32")]
+const LOG_ALL_STORAGE_KEY: &str = "gitrust.log_all";
+
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn initial_log_all() -> bool {
+    use gloo_storage::Storage;
+    gloo_storage::LocalStorage::get::<String>(LOG_ALL_STORAGE_KEY)
+        .ok()
+        .map(|s| s == "true")
+        .unwrap_or(false)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn initial_log_all() -> bool {
+    false
+}
+
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn persist_log_all(all: bool) {
+    use gloo_storage::Storage;
+    let _ =
+        gloo_storage::LocalStorage::set(LOG_ALL_STORAGE_KEY, if all { "true" } else { "false" });
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn persist_log_all(_all: bool) {}
 
 #[cfg(target_arch = "wasm32")]
 pub(crate) fn initial_repo() -> String {

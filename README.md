@@ -31,6 +31,15 @@ What works today:
   `push` (`-u` / `--force-with-lease` flags optional). All shell
   out to the user's `git` binary so SSH agents and HTTPS
   credential helpers Just Work.
+- History-movers: `merge` (with `--no-ff` opt-in) and
+  `cherry-pick`, both reachable as buttons in the commit-detail
+  toolbar so the user picks a target commit visually instead of
+  retyping its oid.
+- History view: log endpoint accepts `all=true` to walk every
+  local + remote-tracking branch tip — visible as an "All
+  branches" toggle next to the history filter. The log block is
+  scrollable on its own so 500-commit history doesn't push the
+  diff panel off-screen.
 - Web shell shows: repository summary card, commit-history table
   with a colored graph column rendering branches and merges, an
   in-history substring filter, a sidebar with branches / remotes /
@@ -63,8 +72,9 @@ Deferred:
 - Streaming progress for long fetch/push (current implementation
   blocks until the git CLI completes; UI shows "Working…" the
   whole time).
-- Merge / rebase / cherry-pick and a conflict-resolution UI.
-- Reset / revert.
+- Conflict-resolution UI — merge / cherry-pick land the conflict
+  state but the user resolves via the CLI for now.
+- Rebase, reset, revert.
 - Hunk-level (and line-level) staging, à la `git add -p`.
 - Tag create / delete, file-history (log filtered to a single path),
   arbitrary-ref diff.

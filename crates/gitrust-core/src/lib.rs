@@ -46,7 +46,14 @@ pub fn summarize_repo(path: &Path) -> anyhow::Result<RepoSummary> {
     })
 }
 
-/// Walk HEAD's ancestors and return up to `limit` matching commits.
+/// Walk commit history and return up to `limit` matching commits.
+///
+/// `all = false` walks HEAD's ancestors (`git log` default). `all = true`
+/// walks every ref tip — local branches plus remote-tracking branches —
+/// merged into one stream sorted newest-first by commit time (`git log
+/// --all`). Tips are deduped so a commit reachable from multiple refs
+/// appears once.
+///
 /// When `query` is `Some(non-empty)`, a commit only counts if the
 /// lowercased query appears in its summary, body, author name, or as
 /// a prefix of its oid. Walking is capped at `MAX_LOG_WALK` so a rare
@@ -55,7 +62,11 @@ pub fn log_commits(
     path: &Path,
     limit: usize,
     query: Option<&str>,
+    all: bool,
 ) -> anyhow::Result<Vec<CommitInfo>> {
+    use gix::revision::walk::Sorting;
+    use gix::traverse::commit::simple::CommitTimeOrder;
+
     const MAX_LOG_WALK: usize = 5_000;
 
     let needle = query
@@ -63,8 +74,42 @@ pub fn log_commits(
         .filter(|s| !s.is_empty());
 
     let repo = gix::open(path)?;
-    let head_id = repo.head_id()?;
-    let walk = head_id.ancestors().all()?;
+
+    let tips: Vec<gix::ObjectId> = if all {
+        let mut t: Vec<gix::ObjectId> = Vec::new();
+        let refs = repo.references()?;
+        for r in refs.local_branches()? {
+            let r = r.map_err(|e| anyhow::anyhow!("{e}"))?;
+            if let Some(id) = r.try_id() {
+                t.push(id.detach());
+            }
+        }
+        for r in refs.remote_branches()? {
+            let r = r.map_err(|e| anyhow::anyhow!("{e}"))?;
+            if let Some(id) = r.try_id() {
+                t.push(id.detach());
+            }
+        }
+        // Ensure HEAD's tip is in the set even on detached HEAD, where
+        // no local ref points at it.
+        if let Ok(head) = repo.head_id() {
+            t.push(head.detach());
+        }
+        t.sort();
+        t.dedup();
+        t
+    } else {
+        vec![repo.head_id()?.detach()]
+    };
+
+    if tips.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let walk = repo
+        .rev_walk(tips)
+        .sorting(Sorting::ByCommitTime(CommitTimeOrder::NewestFirst))
+        .all()?;
     let mut commits = Vec::with_capacity(limit.min(64));
     for item in walk.take(MAX_LOG_WALK) {
         if commits.len() >= limit {
@@ -630,17 +675,23 @@ fn run_git(repo: &Path, args: &[&str]) -> anyhow::Result<std::process::Output> {
         .output()
         .map_err(|e| anyhow::anyhow!("spawning `git {}`: {e}", args.join(" ")))?;
     if !out.status.success() {
+        // Some commands print failure detail on stdout instead of stderr
+        // (notably `git merge` — its "CONFLICT (content): Merge conflict in …"
+        // line goes to stdout). Fold both streams into the error so the
+        // category-classifier downstream sees the real wording.
         let stderr = String::from_utf8_lossy(&out.stderr);
-        let trimmed = stderr.trim();
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        let detail = match (stderr.trim(), stdout.trim()) {
+            ("", "") => "(no output)".to_string(),
+            ("", s) => s.to_string(),
+            (e, "") => e.to_string(),
+            (e, s) => format!("{e}\n{s}"),
+        };
         anyhow::bail!(
             "git {} failed (status {}): {}",
             args.join(" "),
             out.status,
-            if trimmed.is_empty() {
-                "(no stderr)"
-            } else {
-                trimmed
-            }
+            detail
         );
     }
     Ok(out)
@@ -1055,6 +1106,49 @@ pub fn push(
         op: "push".into(),
         remote: trimmed_remote.unwrap_or("").into(),
         summary: format_network_output(&out, "everything up to date"),
+    })
+}
+
+/// `git merge [--no-ff] <target>` — integrate `target` (a branch name,
+/// tag, or commit oid) into the current branch. The default produces
+/// a fast-forward when possible and a merge commit otherwise. Pass
+/// `no_ff: true` to force a merge commit even on fast-forward cases.
+/// On conflict the index and worktree are left in the partially-merged
+/// state and the error envelope carries git's own conflict message —
+/// the user resolves and finalises via the CLI for now (conflict UI is
+/// a separate milestone).
+pub fn merge(repo: &Path, target: &str, no_ff: bool) -> anyhow::Result<NetworkOpResult> {
+    let target = target.trim();
+    if target.is_empty() {
+        anyhow::bail!("merge target must not be empty");
+    }
+    let mut args: Vec<&str> = vec!["merge", "--no-progress"];
+    if no_ff {
+        args.push("--no-ff");
+    }
+    args.push(target);
+    let out = run_git(repo, &args)?;
+    Ok(NetworkOpResult {
+        op: "merge".into(),
+        remote: target.into(),
+        summary: format_network_output(&out, "already up to date"),
+    })
+}
+
+/// `git cherry-pick <oid>` — apply the changes from a single commit on
+/// top of the current branch as a new commit. Conflict behaviour is
+/// the same as `merge`: index and worktree are left mid-pick, and the
+/// caller surfaces the error to the user.
+pub fn cherry_pick(repo: &Path, oid: &str) -> anyhow::Result<NetworkOpResult> {
+    let oid = oid.trim();
+    if oid.is_empty() {
+        anyhow::bail!("cherry-pick oid must not be empty");
+    }
+    let out = run_git(repo, &["cherry-pick", oid])?;
+    Ok(NetworkOpResult {
+        op: "cherry-pick".into(),
+        remote: oid.into(),
+        summary: format_network_output(&out, "cherry-pick applied"),
     })
 }
 
