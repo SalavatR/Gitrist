@@ -666,6 +666,7 @@ table.log .td-graph {
 }
 .graph-svg {
   display: block;
+  overflow: visible;     /* let lane segments overhang into row-padding gaps */
 }
 
 /* ─── Diff view ─────────────────────────────────────────── */

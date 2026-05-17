@@ -40,30 +40,35 @@ fn lane_x(i: usize) -> u32 {
 /// same SVG width so nodes line up vertically.
 pub fn render_graph_cell(row: &RowLayout, width: usize) -> Element {
     let w_px = (width as u32) * LANE_W;
-    let h_px = ROW_H;
+    let h_px = ROW_H as i32;
     let mid = h_px / 2;
-    let node_cx = lane_x(row.node_lane);
+    let node_cx = lane_x(row.node_lane) as i32;
 
-    // Helpers that close over mid/h_px for the in_lanes (top-half) and
-    // out_lanes (bottom-half) renders. The "fresh-branch" exclusion in
-    // the bottom-half lives in the iterator: bottom-half is suppressed
-    // for lanes that this commit just opened (in=false, i != node_lane,
-    // and the diagonal carries the visualization).
-    let in_lines: Vec<(u32, u32, u32, u32, &str)> = row
+    // Vertical halves are stretched past the SVG viewBox by `OVERHANG`
+    // on each side; combined with `overflow: visible`, this bridges the
+    // 2-4px gap that table-cell padding leaves between adjacent SVGs so
+    // the verticals look continuous across row boundaries. The diagonals
+    // stay inside the box so they don't visually overshoot the lane they
+    // merge into.
+    const OVERHANG: i32 = 4;
+    let top_y: i32 = -OVERHANG;
+    let bot_y: i32 = h_px + OVERHANG;
+
+    let in_lines: Vec<(i32, i32, i32, i32, &str)> = row
         .in_lanes
         .iter()
         .enumerate()
         .filter_map(|(i, &active)| {
             if active {
-                let x = lane_x(i);
-                Some((x, 0, x, mid, lane_color(i)))
+                let x = lane_x(i) as i32;
+                Some((x, top_y, x, mid, lane_color(i)))
             } else {
                 None
             }
         })
         .collect();
 
-    let out_lines: Vec<(u32, u32, u32, u32, &str)> = row
+    let out_lines: Vec<(i32, i32, i32, i32, &str)> = row
         .out_lanes
         .iter()
         .enumerate()
@@ -71,8 +76,8 @@ pub fn render_graph_cell(row: &RowLayout, width: usize) -> Element {
             let in_active = row.in_lanes.get(i).copied().unwrap_or(false);
             let is_node = i == row.node_lane;
             if active && (in_active || is_node) {
-                let x = lane_x(i);
-                Some((x, mid, x, h_px, lane_color(i)))
+                let x = lane_x(i) as i32;
+                Some((x, mid, x, bot_y, lane_color(i)))
             } else {
                 None
             }
@@ -80,11 +85,13 @@ pub fn render_graph_cell(row: &RowLayout, width: usize) -> Element {
         .collect();
 
     // Branch and merge diagonals from the node down to other lanes.
-    let edge_lines: Vec<(u32, u32, u32, u32, &str)> = row
+    // Endpoint stays at the row bottom so the diagonal lands on the
+    // lane without overshooting into the next row.
+    let edge_lines: Vec<(i32, i32, i32, i32, &str)> = row
         .edges
         .iter()
         .map(|&t| {
-            let x_to = lane_x(t);
+            let x_to = lane_x(t) as i32;
             (node_cx, mid, x_to, h_px, lane_color(t))
         })
         .collect();
@@ -96,16 +103,17 @@ pub fn render_graph_cell(row: &RowLayout, width: usize) -> Element {
             height: "{h_px}",
             view_box: "0 0 {w_px} {h_px}",
             shape_rendering: "geometricPrecision",
+            overflow: "visible",
             for (x1, y1, x2, y2, col) in in_lines {
                 line {
                     x1: "{x1}", y1: "{y1}", x2: "{x2}", y2: "{y2}",
-                    style: "stroke: {col}; stroke-width: 1.6; stroke-linecap: round;",
+                    style: "stroke: {col}; stroke-width: 1.6; stroke-linecap: butt;",
                 }
             }
             for (x1, y1, x2, y2, col) in out_lines {
                 line {
                     x1: "{x1}", y1: "{y1}", x2: "{x2}", y2: "{y2}",
-                    style: "stroke: {col}; stroke-width: 1.6; stroke-linecap: round;",
+                    style: "stroke: {col}; stroke-width: 1.6; stroke-linecap: butt;",
                 }
             }
             for (x1, y1, x2, y2, col) in edge_lines {
