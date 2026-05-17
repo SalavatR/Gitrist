@@ -307,7 +307,11 @@ fn open_window(url: &str) -> Result<()> {
                 if let Key::Character(s) = &ev.logical_key {
                     match s.to_ascii_lowercase().as_str() {
                         "r" => {
-                            let _ = webview.load_url(url);
+                            // Use the owned `bootstrap_url` clone we already
+                            // made above — the original `url: &str` doesn't
+                            // outlive the function and can't be captured by
+                            // the 'static event_loop closure.
+                            let _ = webview.load_url(&bootstrap_url);
                         }
                         "q" | "w" => {
                             *control_flow = ControlFlow::Exit;
