@@ -655,18 +655,44 @@ table.log .td-when {
   font-size: 0.82rem;
 }
 table.log .th-graph {
-  width: 1px;            /* shrink to SVG content */
+  width: 1px;
   padding-right: 0.4rem;
+}
+/* Trio that lets the graph stretch to the row's full height: tr is
+ * marked height: 1px (a known "shrink-to-content" hint browsers honor
+ * for table rows), td then claims height: 100% of the row, and the
+ * wrap claims height: 100% of the td — children can finally reference
+ * the *resolved* cell height instead of computing against `auto`. */
+table.log tbody tr {
+  height: 1px;
 }
 table.log .td-graph {
   padding: 0 0.4rem 0 0.6rem;
   vertical-align: middle;
-  line-height: 0;        /* kill phantom descender below SVG */
+  height: 100%;
+  line-height: 0;
   white-space: nowrap;
 }
-.graph-svg {
+.graph-wrap {
+  position: relative;
   display: block;
-  overflow: visible;     /* let lane segments overhang into row-padding gaps */
+  height: 100%;
+}
+.graph-lanes {
+  position: absolute;
+  inset: 0;
+  display: block;
+  overflow: visible;
+}
+.graph-node {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  display: block;
+  box-sizing: border-box;
+  border: 1.5px solid var(--surface);
+  border-radius: 50%;
+  pointer-events: none;
 }
 
 /* ─── Diff view ─────────────────────────────────────────── */

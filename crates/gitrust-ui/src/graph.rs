@@ -40,19 +40,15 @@ fn lane_x(i: usize) -> u32 {
 /// same SVG width so nodes line up vertically.
 pub fn render_graph_cell(row: &RowLayout, width: usize) -> Element {
     let w_px = (width as u32) * LANE_W;
-    let h_px = ROW_H as i32;
-    let mid = h_px / 2;
+    // The SVG fills the table cell vertically via `height: 100%` and
+    // `preserveAspectRatio: none`, so the lane and diagonal coordinates
+    // stretch to the actual row height (including multi-line commit
+    // messages, large fonts, etc.). The `h_px` here is only the viewBox
+    // resolution; the visible result is whatever the cell ends up being.
+    let h_px: u32 = ROW_H;
+    let mid = (h_px / 2) as i32;
+    let h = h_px as i32;
     let node_cx = lane_x(row.node_lane) as i32;
-
-    // Vertical halves are stretched past the SVG viewBox by `OVERHANG`
-    // on each side; combined with `overflow: visible`, this bridges the
-    // 2-4px gap that table-cell padding leaves between adjacent SVGs so
-    // the verticals look continuous across row boundaries. The diagonals
-    // stay inside the box so they don't visually overshoot the lane they
-    // merge into.
-    const OVERHANG: i32 = 4;
-    let top_y: i32 = -OVERHANG;
-    let bot_y: i32 = h_px + OVERHANG;
 
     let in_lines: Vec<(i32, i32, i32, i32, &str)> = row
         .in_lanes
@@ -61,7 +57,7 @@ pub fn render_graph_cell(row: &RowLayout, width: usize) -> Element {
         .filter_map(|(i, &active)| {
             if active {
                 let x = lane_x(i) as i32;
-                Some((x, top_y, x, mid, lane_color(i)))
+                Some((x, 0, x, mid, lane_color(i)))
             } else {
                 None
             }
@@ -77,59 +73,64 @@ pub fn render_graph_cell(row: &RowLayout, width: usize) -> Element {
             let is_node = i == row.node_lane;
             if active && (in_active || is_node) {
                 let x = lane_x(i) as i32;
-                Some((x, mid, x, bot_y, lane_color(i)))
+                Some((x, mid, x, h, lane_color(i)))
             } else {
                 None
             }
         })
         .collect();
 
-    // Branch and merge diagonals from the node down to other lanes.
-    // Endpoint stays at the row bottom so the diagonal lands on the
+    // Branch and merge diagonals from the node down to other lanes. Both
+    // endpoints stay inside the cell so the diagonal lands on the target
     // lane without overshooting into the next row.
     let edge_lines: Vec<(i32, i32, i32, i32, &str)> = row
         .edges
         .iter()
         .map(|&t| {
             let x_to = lane_x(t) as i32;
-            (node_cx, mid, x_to, h_px, lane_color(t))
+            (node_cx, mid, x_to, h, lane_color(t))
         })
         .collect();
 
+    let node_color = lane_color(row.node_lane);
+    let node_diameter = 2 * NODE_R + 1; // matches the SVG version (fill + half-stroke each side)
+    let node_left = node_cx - node_diameter as i32 / 2;
+    let node_style = format!(
+        "left: {node_left}px; width: {node_diameter}px; height: {node_diameter}px; background: {node_color};"
+    );
+
     rsx! {
-        svg {
-            class: "graph-svg",
-            width: "{w_px}",
-            height: "{h_px}",
-            view_box: "0 0 {w_px} {h_px}",
-            shape_rendering: "geometricPrecision",
-            overflow: "visible",
-            for (x1, y1, x2, y2, col) in in_lines {
-                line {
-                    x1: "{x1}", y1: "{y1}", x2: "{x2}", y2: "{y2}",
-                    style: "stroke: {col}; stroke-width: 1.6; stroke-linecap: butt;",
+        div { class: "graph-wrap", style: "width: {w_px}px",
+            svg {
+                class: "graph-lanes",
+                width: "100%",
+                height: "100%",
+                view_box: "0 0 {w_px} {h_px}",
+                preserve_aspect_ratio: "none",
+                shape_rendering: "geometricPrecision",
+                overflow: "visible",
+                for (x1, y1, x2, y2, col) in in_lines {
+                    line {
+                        x1: "{x1}", y1: "{y1}", x2: "{x2}", y2: "{y2}",
+                        // `vector-effect: non-scaling-stroke` keeps the stroke
+                        // at a consistent visual width despite the Y-stretch.
+                        style: "stroke: {col}; stroke-width: 1.6; stroke-linecap: butt; vector-effect: non-scaling-stroke;",
+                    }
+                }
+                for (x1, y1, x2, y2, col) in out_lines {
+                    line {
+                        x1: "{x1}", y1: "{y1}", x2: "{x2}", y2: "{y2}",
+                        style: "stroke: {col}; stroke-width: 1.6; stroke-linecap: butt; vector-effect: non-scaling-stroke;",
+                    }
+                }
+                for (x1, y1, x2, y2, col) in edge_lines {
+                    line {
+                        x1: "{x1}", y1: "{y1}", x2: "{x2}", y2: "{y2}",
+                        style: "stroke: {col}; stroke-width: 1.6; stroke-linecap: round; vector-effect: non-scaling-stroke;",
+                    }
                 }
             }
-            for (x1, y1, x2, y2, col) in out_lines {
-                line {
-                    x1: "{x1}", y1: "{y1}", x2: "{x2}", y2: "{y2}",
-                    style: "stroke: {col}; stroke-width: 1.6; stroke-linecap: butt;",
-                }
-            }
-            for (x1, y1, x2, y2, col) in edge_lines {
-                line {
-                    x1: "{x1}", y1: "{y1}", x2: "{x2}", y2: "{y2}",
-                    style: "stroke: {col}; stroke-width: 1.6; stroke-linecap: round;",
-                }
-            }
-            circle {
-                cx: "{node_cx}",
-                cy: "{mid}",
-                r: "{NODE_R}",
-                fill: "{lane_color(row.node_lane)}",
-                stroke: "var(--surface)",
-                style: "stroke-width: 1.5;",
-            }
+            span { class: "graph-node", style: "{node_style}" }
         }
     }
 }
