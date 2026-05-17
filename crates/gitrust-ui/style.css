@@ -654,6 +654,19 @@ table.log .td-when {
   white-space: nowrap;
   font-size: 0.82rem;
 }
+table.log .th-graph {
+  width: 1px;            /* shrink to SVG content */
+  padding-right: 0.4rem;
+}
+table.log .td-graph {
+  padding: 0 0.4rem 0 0.6rem;
+  vertical-align: middle;
+  line-height: 0;        /* kill phantom descender below SVG */
+  white-space: nowrap;
+}
+.graph-svg {
+  display: block;
+}
 
 /* ─── Diff view ─────────────────────────────────────────── */
 

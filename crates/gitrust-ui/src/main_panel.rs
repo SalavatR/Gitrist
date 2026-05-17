@@ -11,6 +11,7 @@ use gitrust_types::{
 };
 
 use crate::diff::{render_file_diff, render_line_content};
+use crate::graph::{RowLayout, compute_graph, graph_width, render_graph_cell};
 use crate::state::BlobSelection;
 use crate::time_fmt::{format_time, format_time_relative};
 
@@ -127,6 +128,7 @@ pub(crate) fn render_log(
     selected_oid: Signal<Option<String>>,
     selected_file: Signal<Option<String>>,
     selected_blob: Signal<Option<BlobSelection>>,
+    show_graph: bool,
 ) -> Element {
     match state {
         Some(Ok(commits)) if commits.is_empty() => {
@@ -134,10 +136,22 @@ pub(crate) fn render_log(
         }
         Some(Ok(commits)) => {
             let rows = commits.clone();
+            // The graph only makes sense over a contiguous ancestry walk.
+            // When the log is search-filtered the result set is sparse,
+            // and a graph rendered over it would lie about parent edges.
+            let layouts: Vec<RowLayout> = if show_graph {
+                compute_graph(&rows)
+            } else {
+                Vec::new()
+            };
+            let g_width = graph_width(&layouts);
             rsx! {
                 table { class: "log",
                     thead {
                         tr {
+                            if show_graph && g_width > 0 {
+                                th { class: "th-graph", "graph" }
+                            }
                             th { class: "th-oid", "commit" }
                             th { class: "th-author", "author" }
                             th { class: "th-msg", "message" }
@@ -145,8 +159,15 @@ pub(crate) fn render_log(
                         }
                     }
                     tbody {
-                        for c in rows {
-                            {render_commit_row(c, selected_oid, selected_file, selected_blob)}
+                        for (i, c) in rows.into_iter().enumerate() {
+                            {render_commit_row(
+                                c,
+                                layouts.get(i),
+                                g_width,
+                                selected_oid,
+                                selected_file,
+                                selected_blob,
+                            )}
                         }
                     }
                 }
@@ -167,12 +188,17 @@ pub(crate) fn render_log(
 
 fn render_commit_row(
     c: CommitInfo,
+    layout: Option<&RowLayout>,
+    g_width: usize,
     mut selected_oid: Signal<Option<String>>,
     mut selected_file: Signal<Option<String>>,
     mut selected_blob: Signal<Option<BlobSelection>>,
 ) -> Element {
     let is_selected = selected_oid.read().as_deref() == Some(c.oid.as_str());
     let oid_for_click = c.oid.clone();
+    let graph_cell = layout
+        .filter(|_| g_width > 0)
+        .map(|l| render_graph_cell(l, g_width));
     rsx! {
         tr {
             key: "{c.oid}",
@@ -188,6 +214,9 @@ fn render_commit_row(
                     selected_blob.set(None);
                 }
             },
+            if let Some(g) = graph_cell {
+                td { class: "td-graph", {g} }
+            }
             td { class: "td-oid", code { "{c.short_oid}" } }
             td { class: "td-author", "{c.author_name}" }
             td { class: "td-msg", "{c.summary}" }

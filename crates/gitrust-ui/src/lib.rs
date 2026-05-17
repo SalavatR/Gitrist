@@ -7,6 +7,7 @@ use gitrust_types::{BlameView, BlobView, CommitDiff, FileDiff};
 
 mod diff;
 mod fetch;
+mod graph;
 mod main_panel;
 mod sidebar;
 mod state;
@@ -453,13 +454,17 @@ fn AppContent() -> Element {
                                 oninput: move |e| log_query.set(e.value()),
                             }
                         }
-                        {render_log(
-                            &log.read_unchecked(),
-                            log,
-                            selected_oid,
-                            selected_file,
-                            selected_blob,
-                        )}
+                        {
+                            let show_graph = log_query.read().trim().is_empty();
+                            render_log(
+                                &log.read_unchecked(),
+                                log,
+                                selected_oid,
+                                selected_file,
+                                selected_blob,
+                                show_graph,
+                            )
+                        }
                     }
 
                     section { class: "main-block",

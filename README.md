@@ -7,7 +7,8 @@ they always see the same state.
 
 ## Status
 
-Early but functional as a read-only client. Roughly v0.2 territory.
+Functional read/write git client with a browser UI and an optional
+native window. Roughly v0.3 territory.
 
 What works today:
 
@@ -15,33 +16,56 @@ What works today:
   Dioxus WebAssembly UI. `gitrust app` (built with
   `--features desktop`) opens a wry+tao window instead of relying on
   a browser; without a display it falls back to printing the URL.
-- Reads cover: `summary`, `log`, `status`, `branches`, `tags`,
-  `remotes`, `tree`, `blob`, `diff`, `diff/working` (all under
-  `/api/repo/`). Any local repo by absolute path.
-- Web shell shows: repository summary card, history table with
-  relative time, sidebar with branches / remotes / tags / working
-  tree / files-at-HEAD blocks, a file viewer with tree-sitter
-  syntax highlighting (Rust, JSON, HTML, CSS, TS/JS, Python, TOML,
-  Lua, Markdown), per-commit diff with rename detection, working-
-  tree diff per file, switchable unified / side-by-side view, and
-  auto-collapse on large diffs.
+  The native window carries a `muda` menu bar (File → Open Repo…,
+  View → Reload, Help → About) and Cmd/Ctrl-R / -Q / -W shortcuts.
+- Reads cover: `summary`, `log` (with substring search across
+  subject / body / author / oid prefix), `status`, `staged`,
+  `branches`, `tags`, `remotes`, `tree`, `blob`, `blame`, `diff`,
+  `diff/working`, `commit?oid=` (all under `/api/repo/`). Any local
+  repo by absolute path.
+- Writes (bearer-token gated): `stage`, `unstage`, `discard`,
+  `commit` (with body + author override), branch create / delete
+  (with force fallback) / rename / checkout, and stash save /
+  list / pop / drop.
+- Web shell shows: repository summary card, commit-history table
+  with a colored graph column rendering branches and merges, an
+  in-history substring filter, a sidebar with branches / remotes /
+  tags / stashes / staged / working-tree / files-at-HEAD blocks
+  (each clickable to open the matching diff or blob), a file
+  viewer with tree-sitter syntax highlighting (Rust, JSON, HTML,
+  CSS, TS/JS, Python, TOML, Lua, Markdown — including inline `code`,
+  *emphasis*, **strong** via a two-pass merge) and a per-line blame
+  column, per-commit diff with rename detection, working-tree diff
+  per file, switchable unified / side-by-side view, auto-collapse
+  on large diffs, light / dark theme toggle, and an in-file find
+  box.
+- Auth: 32-byte token generated on first launch into
+  `$XDG_CONFIG_HOME/gitrust/token`; UI prompts for it on first
+  load, every other endpoint than `/api/health` requires it.
+- Errors carry a structured envelope `{ error, code, hint? }` with
+  category-mapped HTTP statuses (`repo_not_found`,
+  `branch_unmerged`, `worktree_dirty`, `permission_denied`,
+  `bad_oid`, `already_exists`, `generic`).
 - Live updates via WebSocket: the server watches the worktree with
   `notify`, pushes debounced event kinds over `/api/repo/events`,
   and the UI restarts the affected resources without polling delay.
 - Single-binary release: `cargo build --release` bakes the WASM
   bundle in via `include_dir!`, so `./target/release/gitrust serve`
-  is self-contained.
+  is self-contained. Tagged releases (`vX.Y.Z`) attach macOS and
+  Windows binaries to the GitHub Release via Actions.
 
 Deferred:
 
-- Writes: stage / unstage / commit, branch ops, discard. Pending
-  an auth model (signed cookie at first launch is the current
-  sketch).
-- More reads: commit-by-oid permalinks, blame.
-- Native UX polish: menu bar items, keyboard shortcuts, pre-built
-  binaries via `cargo-dist`.
-- Markdown inline highlighting (block grammar runs; inline
-  injection chain through `tree-sitter-highlight` is a TODO).
+- Network ops: `fetch`, `pull`, `push`. Need credentials handling
+  (SSH agent + HTTPS keychain) and a streaming progress channel.
+- Merge / rebase / cherry-pick and a conflict-resolution UI.
+- Reset / revert.
+- Hunk-level (and line-level) staging, à la `git add -p`.
+- Tag create / delete, file-history (log filtered to a single path),
+  arbitrary-ref diff.
+- Multi-repo browser (`gitrust serve --root <dir>` listing workspaces).
+- Pre-built Linux binary (needs a webkit2gtk-4.1 ABI pin
+  strategy across distros).
 
 ## Quickstart
 

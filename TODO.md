@@ -216,6 +216,20 @@ within each section.
       arrives within the debounce window. UI snapshot tests not
       yet (no Dioxus story support that I've found).
 
+## Visualization
+
+- [x] Commit graph column next to the log table. Client-side lane
+      assignment (`crates/gitrust-ui/src/graph.rs`) walks the commit
+      list and emits one `RowLayout` per row with `node_lane`, the
+      `in_lanes` / `out_lanes` snapshots, and the diagonal edges from
+      the node to other lanes (branches + merges). `render_graph_cell`
+      turns each layout into an SVG block with stable per-lane colors;
+      the cell becomes the first `<td>` in the log row so nodes line
+      up vertically. Hidden when the log is search-filtered (sparse
+      result set would lie about parent edges). Algorithm tests cover
+      linear, two-parent merge, octopus, already-pending-parent, and
+      truncated-log cases.
+
 ## Cleanup / nice-to-have
 
 - [x] Rename/copy detection in `list_status` and `list_staged`.
