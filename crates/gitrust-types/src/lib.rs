@@ -160,6 +160,24 @@ pub struct BlameView {
     pub lines: Vec<BlameLine>,
 }
 
+/// One git repository discovered by `scan_root` under the server's
+/// configured root directory. The UI renders these in a Workspaces
+/// sidebar block; clicking one switches the active repo.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RepoEntry {
+    /// Absolute path to the working tree.
+    pub path: String,
+    /// Last path segment — what the UI shows as the workspace name.
+    pub name: String,
+    /// Current branch (shortened, no `refs/heads/` prefix). `None` on
+    /// detached HEAD or unborn repo.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub head_ref: Option<String>,
+    /// Current HEAD oid (full hex). `None` on unborn HEAD.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub head_oid: Option<String>,
+}
+
 /// Snapshot of the worktree's "mid-operation" state. `kind` is the
 /// authoritative field; the others are populated when relevant.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

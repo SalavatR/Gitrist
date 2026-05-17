@@ -1365,3 +1365,81 @@ fn stage_hunks_rejects_untracked_file() {
         "expected kind-related error, got `{msg}`"
     );
 }
+
+#[test]
+fn scan_root_finds_nested_repos_and_skips_dotdirs() {
+    let parent = tempfile::TempDir::new().expect("tempdir");
+    // Three nested repos at depths 1, 2, and 3.
+    let layout: &[(&str, &str)] = &[
+        ("alpha", "alpha"),
+        ("group/beta", "beta"),
+        ("group/sub/gamma", "gamma"),
+    ];
+    for (rel, _name) in layout {
+        let p = parent.path().join(rel);
+        std::fs::create_dir_all(&p).unwrap();
+        run_git_str(&p, &["init", "--initial-branch=master", "-q"]);
+        run_git_str(&p, &["config", "user.name", "Test"]);
+        run_git_str(&p, &["config", "user.email", "test@example.com"]);
+        std::fs::write(p.join("README"), "seed\n").unwrap();
+        run_git_str(&p, &["add", "README"]);
+        run_git_str(&p, &["commit", "-q", "-m", "init"]);
+    }
+    // A `.cache` dotdir holding what looks like a repo should be skipped.
+    let cache = parent.path().join(".cache").join("ignored");
+    std::fs::create_dir_all(&cache).unwrap();
+    run_git_str(&cache, &["init", "--initial-branch=master", "-q"]);
+
+    let found = gitrust_core::scan_root(parent.path(), 5).expect("scan");
+    let names: std::collections::BTreeSet<&str> = found.iter().map(|r| r.name.as_str()).collect();
+    assert!(names.contains("alpha"));
+    assert!(names.contains("beta"));
+    assert!(names.contains("gamma"));
+    assert!(
+        !names.contains("ignored"),
+        "scan should not descend into dotdirs"
+    );
+    for entry in &found {
+        assert_eq!(entry.head_ref.as_deref(), Some("master"));
+        assert!(entry.head_oid.as_ref().is_some_and(|o| o.len() == 40));
+    }
+}
+
+#[test]
+fn scan_root_respects_max_depth() {
+    let parent = tempfile::TempDir::new().expect("tempdir");
+    let deep = parent.path().join("a/b/c/d/e/repo");
+    std::fs::create_dir_all(&deep).unwrap();
+    run_git_str(&deep, &["init", "--initial-branch=master", "-q"]);
+    run_git_str(&deep, &["config", "user.name", "Test"]);
+    run_git_str(&deep, &["config", "user.email", "test@example.com"]);
+    std::fs::write(deep.join("README"), "seed\n").unwrap();
+    run_git_str(&deep, &["add", "README"]);
+    run_git_str(&deep, &["commit", "-q", "-m", "init"]);
+
+    // max_depth=3 reaches a/b/c but not a/b/c/d/e/repo (6 levels deep).
+    let shallow = gitrust_core::scan_root(parent.path(), 3).expect("scan");
+    assert!(shallow.is_empty(), "scan at depth 3 must not reach 6-deep");
+
+    // max_depth=10 finds it.
+    let deep_scan = gitrust_core::scan_root(parent.path(), 10).expect("scan");
+    assert_eq!(deep_scan.len(), 1);
+    assert_eq!(deep_scan[0].name, "repo");
+}
+
+#[test]
+fn scan_root_returns_empty_for_a_root_with_no_repos() {
+    let parent = tempfile::TempDir::new().expect("tempdir");
+    std::fs::create_dir_all(parent.path().join("just/some/dirs")).unwrap();
+    let found = gitrust_core::scan_root(parent.path(), 5).expect("scan");
+    assert!(found.is_empty());
+}
+
+#[test]
+fn scan_root_rejects_non_directory() {
+    let parent = tempfile::TempDir::new().expect("tempdir");
+    let file = parent.path().join("not-a-dir");
+    std::fs::write(&file, "x").unwrap();
+    let err = gitrust_core::scan_root(&file, 5).expect_err("not a dir");
+    assert!(err.to_string().contains("not a directory"));
+}

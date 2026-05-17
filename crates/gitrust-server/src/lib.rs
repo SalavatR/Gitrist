@@ -15,9 +15,9 @@ use tower_http::services::ServeDir;
 use tower_http::trace::TraceLayer;
 
 use gitrust_core::{
-    BlameView, BlobView, BranchInfo, CommitDiff, CommitInfo, FileDiff, NetworkOpResult,
-    RemoteBranchInfo, RepoState, RepoSummary, StashEntry, StatusEntry, TagInfo, TreeEntry,
-    blame_file, checkout as core_checkout, cherry_pick as core_cherry_pick,
+    BlameView, BlobView, BranchInfo, CommitDiff, CommitInfo, DEFAULT_SCAN_DEPTH, FileDiff,
+    NetworkOpResult, RemoteBranchInfo, RepoEntry, RepoState, RepoSummary, StashEntry, StatusEntry,
+    TagInfo, TreeEntry, blame_file, checkout as core_checkout, cherry_pick as core_cherry_pick,
     cherry_pick_abort as core_cherry_pick_abort, cherry_pick_continue as core_cherry_pick_continue,
     commit as core_commit, commit_info, create_branch as core_create_branch,
     delete_branch as core_delete_branch, diff_commit, diff_working, discard_files,
@@ -28,7 +28,7 @@ use gitrust_core::{
     rebase_continue as core_rebase_continue, rebase_skip as core_rebase_skip,
     rename_branch as core_rename_branch, repo_state as core_repo_state, reset as core_reset,
     resolve_file as core_resolve_file, revert as core_revert, revert_abort as core_revert_abort,
-    revert_continue as core_revert_continue, revert_skip as core_revert_skip, show_blob,
+    revert_continue as core_revert_continue, revert_skip as core_revert_skip, scan_root, show_blob,
     stage_files as core_stage_files, stage_hunks as core_stage_hunks,
     stash_drop as core_stash_drop, stash_list as core_stash_list, stash_pop as core_stash_pop,
     stash_save as core_stash_save, summarize_repo, unstage_files as core_unstage,
@@ -74,6 +74,20 @@ async fn health() -> Json<Health> {
 async fn repo_summary(Query(q): Query<PathQuery>) -> Result<Json<RepoSummary>, ApiError> {
     let path = PathBuf::from(q.path);
     summarize_repo(&path).map(Json).map_err(ApiError::from)
+}
+
+/// List repositories under the server's configured workspace root.
+/// Returns an empty list when no root was set, which the UI treats as
+/// "no workspace switcher to render" rather than an error.
+async fn repos_list(State(auth): State<AuthState>) -> Result<Json<Vec<RepoEntry>>, ApiError> {
+    let Some(root) = auth.root.clone() else {
+        return Ok(Json(Vec::new()));
+    };
+    tokio::task::spawn_blocking(move || scan_root(&root, DEFAULT_SCAN_DEPTH))
+        .await
+        .map_err(|e| anyhow::anyhow!("join error: {e}"))?
+        .map(Json)
+        .map_err(ApiError::from)
 }
 
 async fn repo_log(Query(q): Query<LogQuery>) -> Result<Json<Vec<CommitInfo>>, ApiError> {
@@ -946,19 +960,46 @@ fn classify(message: &str) -> (StatusCode, &'static str, Option<&'static str>) {
 #[derive(Clone)]
 pub struct AuthState {
     token: String,
+    /// Optional workspace root. When `Some`, `GET /api/repos` scans it
+    /// and the UI surfaces the result as a workspace switcher. Setting
+    /// it does NOT (in v1) clamp other endpoints to paths under this
+    /// root — the bearer token still gates writes, and gitrust is a
+    /// localhost-only single-user tool, so the convenience-over-
+    /// sandboxing tradeoff seemed right here. A stricter mode is on
+    /// the deferred list.
+    pub(crate) root: Option<PathBuf>,
 }
 
 impl AuthState {
     /// Construct directly from a token — useful for tests that want a
     /// known value without touching the filesystem.
     pub fn new(token: String) -> Self {
-        Self { token }
+        Self { token, root: None }
     }
 
-    /// Load (or create) the token at the default path.
+    /// Same as `new` but also configures the workspace root that
+    /// `GET /api/repos` will scan.
+    pub fn with_root(token: String, root: PathBuf) -> Self {
+        Self {
+            token,
+            root: Some(root),
+        }
+    }
+
+    /// Load (or create) the token at the default path. No workspace root.
     pub fn from_default_path() -> anyhow::Result<Self> {
         Ok(Self {
             token: load_or_create_token()?,
+            root: None,
+        })
+    }
+
+    /// Load (or create) the token at the default path, with a workspace
+    /// root configured. Used when `gitrust serve --root <dir>` is set.
+    pub fn from_default_path_with_root(root: PathBuf) -> anyhow::Result<Self> {
+        Ok(Self {
+            token: load_or_create_token()?,
+            root: Some(root),
         })
     }
 }
@@ -1073,6 +1114,7 @@ pub fn router(source: WebSource, auth: AuthState) -> Router {
     let open = Router::new().route("/health", get(health));
 
     let protected = Router::new()
+        .route("/repos", get(repos_list))
         .route("/repo/summary", get(repo_summary))
         .route("/repo/log", get(repo_log))
         .route("/repo/status", get(repo_status))
@@ -1190,10 +1232,27 @@ fn guess_content_type(path: &str) -> &'static str {
 }
 
 pub async fn serve(addr: SocketAddr, source: WebSource) -> anyhow::Result<()> {
-    let auth = AuthState::from_default_path()?;
+    serve_with_root(addr, source, None).await
+}
+
+/// Same as `serve` but configures a workspace root for the
+/// `GET /api/repos` endpoint. Only that endpoint depends on it; the
+/// existing path-based endpoints still accept any path.
+pub async fn serve_with_root(
+    addr: SocketAddr,
+    source: WebSource,
+    root: Option<PathBuf>,
+) -> anyhow::Result<()> {
+    let auth = match root {
+        Some(r) => AuthState::from_default_path_with_root(r)?,
+        None => AuthState::from_default_path()?,
+    };
     let listener = tokio::net::TcpListener::bind(addr).await?;
     let bound = listener.local_addr()?;
     tracing::info!("gitrust-server listening on http://{bound}");
+    if let Some(ref r) = auth.root {
+        tracing::info!("workspace root: {}", r.display());
+    }
     print_auth_banner(bound, &auth.token);
     axum::serve(listener, router(source, auth)).await?;
     Ok(())

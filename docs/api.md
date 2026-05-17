@@ -49,6 +49,37 @@ curl http://127.0.0.1:3737/api/health
 { "status": "ok", "version": "0.1.0" }
 ```
 
+## `GET /api/repos`
+
+Workspaces discovery — returns every git repository under the server's
+configured root directory. Returns `[]` when `gitrust serve` was
+started without `--root <dir>`. UIs render the result as a workspace
+switcher.
+
+```sh
+gitrust serve --root /home/me/projects
+curl -H "Authorization: Bearer $TOKEN" http://127.0.0.1:3737/api/repos
+```
+
+```json
+[
+  {
+    "path": "/home/me/projects/gitrust",
+    "name": "gitrust",
+    "head_ref": "master",
+    "head_oid": "85ea44373cc77f401b5ea4fc665c08e8c026fbe4"
+  }
+]
+```
+
+The scan walks up to 5 directory levels deep, stops descending into
+any directory that contains `.git/` (so `.git/objects` is never
+enumerated), and skips dotfiles, symlinks, `node_modules/`, and
+`target/`. Sorted by `name`. Discovery is recomputed on each call —
+there's no cache — and currently does not narrow other endpoints to
+paths under root (the bearer token already gates writes; clamping is
+on the deferred list).
+
 ## `GET /api/repo/summary?path=<path>`
 
 Identifies the repository at `path`.

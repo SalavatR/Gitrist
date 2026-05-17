@@ -7,8 +7,8 @@ use gix::diff::blob::{Algorithm, InternedInput, Token as IDToken};
 
 pub use gitrust_types::{
     BlameLine, BlameView, BlobLine, BlobView, BranchInfo, CommitDiff, CommitInfo, DiffHunk,
-    DiffLine, FileDiff, NetworkOpResult, RemoteBranchInfo, RepoState, RepoSummary, StashEntry,
-    StatusEntry, TagInfo, Token, TreeEntry,
+    DiffLine, FileDiff, NetworkOpResult, RemoteBranchInfo, RepoEntry, RepoState, RepoSummary,
+    StashEntry, StatusEntry, TagInfo, Token, TreeEntry,
 };
 
 fn build_commit_info(repo: &gix::Repository, oid: gix::ObjectId) -> anyhow::Result<CommitInfo> {
@@ -30,6 +30,80 @@ fn build_commit_info(repo: &gix::Repository, oid: gix::ObjectId) -> anyhow::Resu
         author_email: author.email.to_string(),
         time_unix: time.seconds,
     })
+}
+
+/// Default walk depth for `scan_root`. Five levels covers the usual
+/// `~/projects/<group>/<repo>/...` layout without descending into deep
+/// monorepos.
+pub const DEFAULT_SCAN_DEPTH: usize = 5;
+
+/// Walk `root` recursively up to `max_depth` and collect every git
+/// working tree found. Stops descending whenever it hits a `.git/`
+/// directory (so the contents of `.git/objects` are never scanned),
+/// and skips symlinked subdirectories so the scan can't loop. Each
+/// entry carries the path, the last path component as a display name,
+/// and a snapshot of `HEAD` for the UI workspace switcher.
+///
+/// On `gix::open` errors for an individual entry (e.g. a directory
+/// that's a `.git` but doesn't open cleanly) the entry is dropped
+/// rather than aborting the whole scan — partial results are more
+/// useful than a single broken repo killing discovery.
+pub fn scan_root(root: &Path, max_depth: usize) -> anyhow::Result<Vec<RepoEntry>> {
+    if !root.is_dir() {
+        anyhow::bail!("scan root is not a directory: {}", root.display());
+    }
+    let mut found: Vec<RepoEntry> = Vec::new();
+    scan_dir(root, max_depth, &mut found);
+    // Sort by display name so the UI ordering is stable and obvious.
+    found.sort_by(|a, b| a.name.cmp(&b.name));
+    Ok(found)
+}
+
+fn scan_dir(dir: &Path, depth_left: usize, out: &mut Vec<RepoEntry>) {
+    // A directory is a git working tree if it contains a `.git` entry
+    // (either a real dir or a `gitdir:` file for worktrees).
+    let git_marker = dir.join(".git");
+    if git_marker.exists() {
+        if let Ok(summary) = summarize_repo(dir) {
+            let name = dir
+                .file_name()
+                .map(|s| s.to_string_lossy().into_owned())
+                .unwrap_or_else(|| dir.display().to_string());
+            out.push(RepoEntry {
+                path: dir.display().to_string(),
+                name,
+                head_ref: summary.head_ref,
+                head_oid: summary.head_oid,
+            });
+        }
+        // Don't descend into a repo — nested submodules / fixtures
+        // would balloon the listing.
+        return;
+    }
+    if depth_left == 0 {
+        return;
+    }
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let p = entry.path();
+        // Skip symlinks so a recursive symlink can't trap the walker.
+        let Ok(meta) = entry.file_type() else {
+            continue;
+        };
+        if meta.is_symlink() || !meta.is_dir() {
+            continue;
+        }
+        if let Some(name) = p.file_name().and_then(|n| n.to_str())
+            && (name.starts_with('.') || name == "node_modules" || name == "target")
+        {
+            // Skip dotfiles (incl. `.git` if a stray one), package
+            // caches, build artifacts — none of these host repos.
+            continue;
+        }
+        scan_dir(&p, depth_left - 1, out);
+    }
 }
 
 pub fn summarize_repo(path: &Path) -> anyhow::Result<RepoSummary> {

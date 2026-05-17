@@ -40,6 +40,12 @@ What works today:
   rows get a checkbox per hunk; the "Stage N hunk(s)" button
   ships a subset patch through `git apply --cached --recount`
   so only the ticked hunks land in the index.
+- Multi-repo browser. `gitrust serve --root <dir>` (and
+  `gitrust app --root <dir>`) scans the directory for git
+  worktrees up to five levels deep; the UI shows them as a
+  Workspaces sidebar block at the top, clicking switches the
+  active repo. Without `--root` the block stays hidden and the
+  classic single-repo path-input flow is unchanged.
 - Conflict resolution: when a merge / rebase / cherry-pick /
   revert hits a conflict, a banner above the main panel surfaces
   the in-progress state, the conflicted file list with per-file
@@ -89,6 +95,10 @@ Deferred:
   needs a `staged-vs-HEAD` diff endpoint to feed the picker.
 - Line-level staging — checkbox per `add`/`del` line, currently
   per-hunk only.
+- Server-side path clamping when `--root` is set — currently the
+  workspace scanner reports discovered repos but the path-based
+  endpoints still accept any absolute path. Localhost-only + the
+  bearer token make this acceptable for v1.
 - Hunk-level (and line-level) staging, à la `git add -p`.
 - Tag create / delete, file-history (log filtered to a single path),
   arbitrary-ref diff.

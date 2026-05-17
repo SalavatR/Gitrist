@@ -30,6 +30,11 @@ enum Command {
         /// one. Useful during development with `make web`.
         #[arg(long)]
         web_dist: Option<PathBuf>,
+        /// Workspace root. When set, `/api/repos` scans this directory
+        /// for git repositories and the UI exposes a Workspaces sidebar
+        /// for quick switching. Omit to run in single-repo mode.
+        #[arg(long)]
+        root: Option<PathBuf>,
     },
     /// Open the UI in a native window. Falls back to printing a URL on
     /// platforms without a usable webview (headless build, no display).
@@ -39,6 +44,9 @@ enum Command {
         /// Skip the window; just run the server and print the URL.
         #[arg(long)]
         no_window: bool,
+        /// Workspace root for multi-repo browsing (see `serve --root`).
+        #[arg(long)]
+        root: Option<PathBuf>,
     },
 }
 
@@ -46,15 +54,23 @@ fn main() -> Result<()> {
     init_tracing();
     let cli = Cli::parse();
     match cli.command {
-        Command::Serve { addr, web_dist } => {
+        Command::Serve {
+            addr,
+            web_dist,
+            root,
+        } => {
             let rt = tokio::runtime::Runtime::new()?;
             rt.block_on(async {
                 let source = pick_web_source(web_dist);
-                gitrust_server::serve(addr, source).await
+                gitrust_server::serve_with_root(addr, source, root).await
             })?;
             Ok(())
         }
-        Command::App { addr, no_window } => run_app(addr, no_window),
+        Command::App {
+            addr,
+            no_window,
+            root,
+        } => run_app(addr, no_window, root),
     }
 }
 
@@ -67,10 +83,11 @@ fn init_tracing() {
         .init();
 }
 
-fn run_app(addr: SocketAddr, no_window: bool) -> Result<()> {
+fn run_app(addr: SocketAddr, no_window: bool, root: Option<PathBuf>) -> Result<()> {
     let rt = tokio::runtime::Runtime::new()?;
     let source = pick_web_source(None);
-    let server_handle = rt.spawn(async move { gitrust_server::serve(addr, source).await });
+    let server_handle =
+        rt.spawn(async move { gitrust_server::serve_with_root(addr, source, root).await });
     rt.block_on(wait_listening(addr))?;
     let url = format!("http://{addr}");
 

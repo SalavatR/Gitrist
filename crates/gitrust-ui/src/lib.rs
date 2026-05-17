@@ -17,8 +17,8 @@ mod ws;
 
 use fetch::{
     fetch_blame, fetch_blob, fetch_branches, fetch_diff, fetch_diff_working, fetch_log,
-    fetch_remotes, fetch_staged, fetch_stashes, fetch_state, fetch_status, fetch_summary,
-    fetch_tags, fetch_tree,
+    fetch_remotes, fetch_repos, fetch_staged, fetch_stashes, fetch_state, fetch_status,
+    fetch_summary, fetch_tags, fetch_tree,
 };
 use main_panel::{render_commit_form, render_detail, render_log, render_summary_card};
 use sidebar::{
@@ -178,6 +178,11 @@ fn AppContent() -> Element {
         let path = current_repo.read().clone();
         async move { fetch_state(&path).await }
     });
+    // Workspaces (multi-repo browser). Empty list = no `--root` set on
+    // the server → we hide the sidebar block entirely. Doesn't depend
+    // on `current_repo`, so it only fetches once per session unless
+    // the user signs out and back in.
+    let repos = use_resource(|| async move { fetch_repos().await });
 
     // Polling stays as a silent fallback — WS push is the primary path.
     use_future(move || async move {
@@ -649,6 +654,64 @@ fn AppContent() -> Element {
 
             div { class: "split",
                 aside { class: "sidebar",
+                    {
+                        // Workspaces — only shown when the server was
+                        // launched with `--root <dir>` AND it found at
+                        // least one repo. Otherwise the block hides
+                        // entirely so single-repo deployments don't
+                        // see an empty section.
+                        let repos_state = repos.read_unchecked().clone();
+                        let items: Vec<_> = repos_state
+                            .as_ref()
+                            .and_then(|r| r.as_ref().ok())
+                            .cloned()
+                            .unwrap_or_default();
+                        if items.is_empty() {
+                            rsx! {}
+                        } else {
+                            let n = items.len();
+                            let active = current_repo.read().clone();
+                            rsx! {
+                                section { class: "side-block",
+                                    div { class: "side-title",
+                                        span { "Workspaces" }
+                                        span { class: "side-count", "{n}" }
+                                    }
+                                    ul { class: "workspace-list",
+                                        for repo in items {
+                                            {
+                                                let path = repo.path.clone();
+                                                let is_active = path == active;
+                                                let branch = repo
+                                                    .head_ref
+                                                    .clone()
+                                                    .unwrap_or_else(|| "(detached)".into());
+                                                let target = path.clone();
+                                                let cls = if is_active {
+                                                    "workspace-item active"
+                                                } else {
+                                                    "workspace-item"
+                                                };
+                                                rsx! {
+                                                    li { key: "{path}",
+                                                        button {
+                                                            class: "{cls}",
+                                                            title: "{path}",
+                                                            onclick: move |_| {
+                                                                current_repo.set(target.clone());
+                                                            },
+                                                            span { class: "workspace-name", "{repo.name}" }
+                                                            span { class: "workspace-branch", "{branch}" }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                     section { class: "side-block",
                         div { class: "side-title",
                             span { "Branches" }

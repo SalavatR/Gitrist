@@ -704,6 +704,55 @@ details.tree-folder summary.tree-folder-row::-webkit-details-marker { display: n
   font-size: 0.8rem;
   cursor: pointer;
 }
+.workspace-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+.workspace-list li {
+  margin: 0;
+}
+.workspace-item {
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  padding: 0.4rem 0.55rem;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  color: inherit;
+  font: inherit;
+}
+.workspace-item:hover {
+  background: var(--surface-2);
+}
+.workspace-item.active {
+  background: var(--accent-bg);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.workspace-name {
+  font-weight: 500;
+  font-size: 0.88rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.workspace-branch {
+  font-size: 0.75rem;
+  color: var(--muted);
+  font-family: ui-monospace, "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
+}
+.workspace-item.active .workspace-branch {
+  color: var(--accent);
+}
+
 .hunk-stage-bar {
   display: flex;
   align-items: center;

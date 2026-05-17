@@ -216,6 +216,25 @@ within each section.
       arrives within the debounce window. UI snapshot tests not
       yet (no Dioxus story support that I've found).
 
+## Multi-repo
+
+- [x] `gitrust serve --root <dir>` (and `app --root <dir>`) +
+      `GET /api/repos`. Core `scan_root(root, max_depth)` walks the
+      tree, stops at any directory containing `.git/` so we never
+      enumerate `.git/objects`, skips symlinks / dotfiles /
+      `node_modules` / `target`, and produces `RepoEntry { path,
+      name, head_ref?, head_oid? }` rows sorted by name. `AuthState`
+      grew an `Option<PathBuf> root` field plus a
+      `from_default_path_with_root` constructor; `serve_with_root`
+      is the new entry point that `main.rs` plumbs the clap flag
+      into. UI: new top sidebar block "Workspaces" rendering each
+      entry as a clickable row with name + branch; the block
+      hides itself when the list is empty, so single-repo
+      deployments look unchanged. Four `scan_root` tests cover
+      nested-discovery, max-depth, empty-root, and not-a-dir
+      cases. Server-side path clamping under root is deferred —
+      noted in README's deferred list.
+
 ## Staging
 
 - [x] Hunk-level staging via `POST /api/repo/stage-hunks { file,

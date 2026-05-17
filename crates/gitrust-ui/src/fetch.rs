@@ -5,7 +5,8 @@
 
 use gitrust_types::{
     BlameView, BlobView, BranchInfo, CommitDiff, CommitInfo, FileDiff, NetworkOpResult,
-    RemoteBranchInfo, RepoState, RepoSummary, StashEntry, StatusEntry, TagInfo, TreeEntry,
+    RemoteBranchInfo, RepoEntry, RepoState, RepoSummary, StashEntry, StatusEntry, TagInfo,
+    TreeEntry,
 };
 
 // `q` percent-encodes a single query-string value. Paths can contain
@@ -14,6 +15,11 @@ use gitrust_types::{
 #[cfg(target_arch = "wasm32")]
 fn q(s: &str) -> std::borrow::Cow<'_, str> {
     urlencoding::encode(s)
+}
+
+#[cfg(target_arch = "wasm32")]
+pub(crate) async fn fetch_repos() -> Result<Vec<RepoEntry>, String> {
+    fetch_json("/api/repos").await
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -524,6 +530,11 @@ async fn extract_error(resp: gloo_net::http::Response) -> String {
         }
         Err(_) => format!("HTTP {status}"),
     }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) async fn fetch_repos() -> Result<Vec<RepoEntry>, String> {
+    Err("native build: fetching not implemented".into())
 }
 
 #[cfg(not(target_arch = "wasm32"))]
