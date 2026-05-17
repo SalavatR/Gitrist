@@ -646,7 +646,16 @@ table.log tbody tr.selected { background: var(--accent-bg); }
 table.log tbody tr.selected td { border-bottom-color: var(--border); }
 table.log .td-oid code { font-size: 0.82rem; color: var(--text-2); }
 table.log .td-author { color: var(--text-2); white-space: nowrap; max-width: 12rem; overflow: hidden; text-overflow: ellipsis; }
-table.log .td-msg { width: 60%; }
+table.log .td-msg {
+  width: 60%;
+  /* Keep summaries on one line so log rows have a uniform height —
+   * the graph column on the left assumes a fixed row geometry. The
+   * full subject + body still show in the commit-detail panel. */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 0;
+}
 table.log tbody tr.selected .td-msg { font-weight: 600; }
 table.log .td-when {
   color: var(--muted);
@@ -658,41 +667,15 @@ table.log .th-graph {
   width: 1px;
   padding-right: 0.4rem;
 }
-/* Trio that lets the graph stretch to the row's full height: tr is
- * marked height: 1px (a known "shrink-to-content" hint browsers honor
- * for table rows), td then claims height: 100% of the row, and the
- * wrap claims height: 100% of the td — children can finally reference
- * the *resolved* cell height instead of computing against `auto`. */
-table.log tbody tr {
-  height: 1px;
-}
 table.log .td-graph {
   padding: 0 0.4rem 0 0.6rem;
   vertical-align: middle;
-  height: 100%;
   line-height: 0;
   white-space: nowrap;
 }
-.graph-wrap {
-  position: relative;
+.graph-svg {
   display: block;
-  height: 100%;
-}
-.graph-lanes {
-  position: absolute;
-  inset: 0;
-  display: block;
-  overflow: visible;
-}
-.graph-node {
-  position: absolute;
-  top: 50%;
-  transform: translateY(-50%);
-  display: block;
-  box-sizing: border-box;
-  border: 1.5px solid var(--surface);
-  border-radius: 50%;
-  pointer-events: none;
+  overflow: visible;     /* lane segments overhang into row-padding gaps */
 }
 
 /* ─── Diff view ─────────────────────────────────────────── */
