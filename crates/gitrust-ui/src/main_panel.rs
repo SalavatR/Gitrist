@@ -10,6 +10,8 @@ use gitrust_types::{
     BlameLine, BlameView, BlobLine, BlobView, CommitDiff, CommitInfo, FileDiff, RepoSummary,
 };
 
+use std::collections::HashSet;
+
 use crate::diff::{render_file_diff, render_line_content};
 use crate::graph::{RowLayout, compute_graph, graph_width, render_graph_cell};
 use crate::state::BlobSelection;
@@ -231,6 +233,7 @@ pub(crate) fn render_detail(
     commit_res: Resource<Result<Option<CommitDiff>, String>>,
     working_state: &Option<Result<Option<FileDiff>, String>>,
     working_res: Resource<Result<Option<FileDiff>, String>>,
+    working_res_for_restart: Resource<Result<Option<FileDiff>, String>>,
     blob_state: &Option<Result<Option<BlobView>, String>>,
     blob_res: Resource<Result<Option<BlobView>, String>>,
     blame_state: &Option<Result<Option<BlameView>, String>>,
@@ -239,12 +242,26 @@ pub(crate) fn render_detail(
     selected_file: Signal<Option<String>>,
     selected_blob: Signal<Option<BlobSelection>>,
     side_by_side: bool,
+    current_repo: Signal<String>,
+    hunk_picker: Signal<HashSet<usize>>,
+    net_busy: Signal<bool>,
+    net_result: Signal<Option<Result<gitrust_types::NetworkOpResult, String>>>,
 ) -> Element {
     if selected_blob.read().is_some() {
         return render_blob_viewer(blob_state, blob_res, blame_state, blob_query);
     }
     if let Some(file) = selected_file.read().clone() {
-        return render_working_detail(working_state, working_res, &file, side_by_side);
+        return render_working_detail(
+            working_state,
+            working_res,
+            working_res_for_restart,
+            &file,
+            side_by_side,
+            current_repo,
+            hunk_picker,
+            net_busy,
+            net_result,
+        );
     }
     if selected_oid.read().is_some() {
         return render_commit_detail(commit_state, commit_res, side_by_side);
@@ -390,17 +407,32 @@ fn render_blame_cell(blame: Option<BlameLine>) -> Element {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn render_working_detail(
     state: &Option<Result<Option<FileDiff>, String>>,
     mut res: Resource<Result<Option<FileDiff>, String>>,
+    mut res_for_restart: Resource<Result<Option<FileDiff>, String>>,
     file: &str,
     side_by_side: bool,
+    current_repo: Signal<String>,
+    mut hunk_picker: Signal<HashSet<usize>>,
+    mut net_busy: Signal<bool>,
+    mut net_result: Signal<Option<Result<gitrust_types::NetworkOpResult, String>>>,
 ) -> Element {
     match state {
         Some(Ok(Some(f))) => {
             let path = file.to_string();
+            let path_for_action = path.clone();
             let kind = f.kind.clone();
             let f_clone = f.clone();
+            // Show the staging toolbar only for `modified` files —
+            // untracked / deleted / added files don't have a meaningful
+            // hunk-level subset to pick from (the underlying `git apply`
+            // refuses too).
+            let stageable = kind == "modified" && !f.is_binary;
+            let picked = hunk_picker.read().clone();
+            let n_picked = picked.len();
+            let busy = *net_busy.read();
             rsx! {
                 div { class: "diff-header",
                     div { class: "title",
@@ -409,8 +441,50 @@ fn render_working_detail(
                         code { class: "full-oid", "{path}" }
                     }
                     div { class: "meta", "Working tree vs index" }
+                    if stageable {
+                        div { class: "hunk-stage-bar",
+                            span { class: "muted small",
+                                if n_picked == 0 {
+                                    "Tick hunks to stage them piecemeal — or stage the whole file from the sidebar."
+                                } else if n_picked == 1 {
+                                    "1 hunk selected"
+                                } else {
+                                    "{n_picked} hunks selected"
+                                }
+                            }
+                            button {
+                                class: "stage-hunks-btn",
+                                disabled: busy || n_picked == 0,
+                                onclick: move |_| {
+                                    let repo = current_repo.read().clone();
+                                    let file = path_for_action.clone();
+                                    let hunks: Vec<usize> = hunk_picker
+                                        .read()
+                                        .iter()
+                                        .copied()
+                                        .collect::<Vec<_>>();
+                                    net_busy.set(true);
+                                    net_result.set(None);
+                                    spawn(async move {
+                                        let r = crate::fetch::post_stage_hunks(
+                                            &repo, &file, &hunks,
+                                        )
+                                        .await;
+                                        net_busy.set(false);
+                                        if let Err(e) = r {
+                                            net_result.set(Some(Err(e)));
+                                        } else {
+                                            hunk_picker.set(HashSet::new());
+                                        }
+                                        res_for_restart.restart();
+                                    });
+                                },
+                                if n_picked == 0 { "Stage hunks" } else { "Stage {n_picked} hunk(s)" }
+                            }
+                        }
+                    }
                 }
-                {render_file_diff(f_clone, side_by_side)}
+                {render_file_diff(f_clone, side_by_side, if stageable { Some(hunk_picker) } else { None })}
             }
         }
         Some(Ok(None)) | None => rsx! { p { class: "muted", "Loading…" } },
@@ -470,7 +544,7 @@ fn render_commit_detail(
                     p { class: "muted", "No file changes." }
                 }
                 for f in files {
-                    {render_file_diff(f, side_by_side)}
+                    {render_file_diff(f, side_by_side, None)}
                 }
             }
         }

@@ -1268,3 +1268,100 @@ fn reset_rejects_unknown_mode() {
     let msg = err.to_string();
     assert!(msg.contains("soft") && msg.contains("hard"));
 }
+
+#[test]
+fn stage_hunks_stages_a_single_selected_hunk() {
+    let r = TestRepo::new();
+    // 20-line file; commit a baseline.
+    let baseline: String = (1..=20).map(|i| format!("line {i}\n")).collect();
+    r.write("a", &baseline);
+    r.git(&["add", "a"]);
+    r.git(&["commit", "-q", "-m", "init"]);
+
+    // Two non-adjacent edits → two hunks: line 3 and line 17.
+    let mut edited: Vec<String> = (1..=20).map(|i| format!("line {i}\n")).collect();
+    edited[2] = "line 3 EDITED\n".to_string();
+    edited[16] = "line 17 EDITED\n".to_string();
+    r.write("a", &edited.concat());
+
+    // The working diff should report two hunks.
+    let diff = gitrust_core::diff_working(r.path(), "a").expect("diff");
+    assert_eq!(diff.hunks.len(), 2);
+
+    // Stage only the second hunk (index 1).
+    gitrust_core::stage_hunks(r.path(), "a", &[1]).expect("stage hunk 1");
+
+    // Index now carries hunk 1's edit but not hunk 0's.
+    let cached = r.git(&["diff", "--cached", "a"]);
+    assert!(cached.contains("line 17 EDITED"), "hunk 1 should be staged");
+    assert!(
+        !cached.contains("line 3 EDITED"),
+        "hunk 0 should NOT be staged"
+    );
+
+    // Working tree still has both edits — staging just copies into the
+    // index, doesn't move the worktree.
+    let on_disk = std::fs::read_to_string(r.path().join("a")).unwrap();
+    assert!(on_disk.contains("line 3 EDITED"));
+    assert!(on_disk.contains("line 17 EDITED"));
+}
+
+#[test]
+fn stage_hunks_stages_all_when_every_index_picked() {
+    let r = TestRepo::new();
+    r.write("a", "1\n2\n3\n");
+    r.git(&["add", "a"]);
+    r.git(&["commit", "-q", "-m", "init"]);
+    r.write("a", "1 edit\n2\n3 edit\n");
+
+    let diff = gitrust_core::diff_working(r.path(), "a").expect("diff");
+    let all: Vec<usize> = (0..diff.hunks.len()).collect();
+    gitrust_core::stage_hunks(r.path(), "a", &all).expect("stage all");
+
+    // Everything staged → worktree-vs-index diff is empty.
+    let cached = r.git(&["diff", "--cached", "a"]);
+    assert!(cached.contains("1 edit"));
+    assert!(cached.contains("3 edit"));
+    let unstaged = r.git(&["diff", "a"]);
+    assert!(
+        unstaged.trim().is_empty(),
+        "nothing should remain unstaged, got: {unstaged}"
+    );
+}
+
+#[test]
+fn stage_hunks_rejects_out_of_range_index() {
+    let r = TestRepo::new();
+    r.write("a", "x\n");
+    r.git(&["add", "a"]);
+    r.git(&["commit", "-q", "-m", "init"]);
+    r.write("a", "y\n");
+    let err = gitrust_core::stage_hunks(r.path(), "a", &[42]).expect_err("out of range");
+    assert!(err.to_string().contains("out of range"));
+}
+
+#[test]
+fn stage_hunks_rejects_empty_selection() {
+    let r = TestRepo::new();
+    r.write("a", "x\n");
+    r.git(&["add", "a"]);
+    r.git(&["commit", "-q", "-m", "init"]);
+    r.write("a", "y\n");
+    let err = gitrust_core::stage_hunks(r.path(), "a", &[]).expect_err("empty");
+    assert!(err.to_string().contains("no hunks"));
+}
+
+#[test]
+fn stage_hunks_rejects_untracked_file() {
+    let r = TestRepo::new();
+    r.write("a", "x\n");
+    r.git(&["add", "a"]);
+    r.git(&["commit", "-q", "-m", "init"]);
+    r.write("brand-new", "fresh\n");
+    let err = gitrust_core::stage_hunks(r.path(), "brand-new", &[0]).expect_err("untracked");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("modified") || msg.contains("untracked"),
+        "expected kind-related error, got `{msg}`"
+    );
+}

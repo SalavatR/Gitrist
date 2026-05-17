@@ -704,6 +704,46 @@ details.tree-folder summary.tree-folder-row::-webkit-details-marker { display: n
   font-size: 0.8rem;
   cursor: pointer;
 }
+.hunk-stage-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-top: 0.4rem;
+}
+.hunk-stage-bar .small {
+  flex: 1;
+  font-size: 0.78rem;
+}
+.stage-hunks-btn {
+  padding: 0.35rem 0.85rem;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  background: var(--accent-bg);
+  color: var(--accent);
+  cursor: pointer;
+  font-size: 0.82rem;
+  font-weight: 500;
+}
+.stage-hunks-btn:hover:not(:disabled) {
+  background: var(--accent);
+  color: var(--surface);
+}
+.stage-hunks-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.hunk-header {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.hunk-pick {
+  margin: 0;
+  cursor: pointer;
+}
+.hunk-header-text {
+  flex: 1;
+}
 .history-search {
   flex: 0 1 22rem;
   padding: 0.3rem 0.6rem;

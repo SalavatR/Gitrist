@@ -110,8 +110,16 @@ fn AppContent() -> Element {
     let mut net_busy = use_signal(|| false);
     let mut net_result = use_signal(|| None::<Result<NetworkOpResult, String>>);
     let mut reset_mode = use_signal(|| "mixed".to_string());
+    let mut hunk_picker = use_signal(std::collections::HashSet::<usize>::new);
 
     use_effect(move || persist_log_all(*log_all.read()));
+    // Clear the hunk selection whenever the user switches to a different
+    // file — otherwise indices saved for file A would be re-applied as
+    // checkbox state on file B's unrelated hunks.
+    use_effect(move || {
+        let _ = selected_file.read();
+        hunk_picker.set(std::collections::HashSet::new());
+    });
 
     use_effect(move || {
         let path = current_repo.read().clone();
@@ -938,6 +946,7 @@ fn AppContent() -> Element {
                             diff,
                             &working_diff_stale.read_unchecked(),
                             working_diff,
+                            working_diff,
                             &blob_view_stale.read_unchecked(),
                             blob_view,
                             &blame_view_stale.read_unchecked(),
@@ -946,6 +955,10 @@ fn AppContent() -> Element {
                             selected_file,
                             selected_blob,
                             *side_by_side.read(),
+                            current_repo,
+                            hunk_picker,
+                            net_busy,
+                            net_result,
                         )}
                     }
                 }

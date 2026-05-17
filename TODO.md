@@ -216,6 +216,22 @@ within each section.
       arrives within the debounce window. UI snapshot tests not
       yet (no Dioxus story support that I've found).
 
+## Staging
+
+- [x] Hunk-level staging via `POST /api/repo/stage-hunks { file,
+      hunks: [usize] }`. Core re-fetches the working diff for the
+      file, filters to the requested indices, serializes them back
+      to a unified-diff text (`diff --git` / `---` / `+++` / `@@`
+      headers, ` `/`+`/`-` line prefixes), and pipes the result
+      through `git apply --cached --recount` — `--recount` lets
+      `git` recompute inter-hunk line drift when the user picked
+      a sparse subset, so we don't have to renumber by hand. UI:
+      each hunk header in the working-tree diff gets a checkbox,
+      and a "Stage N hunk(s)" button under the file header fires
+      the POST. Five tempdir integration tests cover single-hunk,
+      all-hunks, out-of-range, empty-selection, and untracked-file
+      cases. Unstage-by-hunks and line-level subsets are deferred.
+
 ## History rewriters
 
 - [x] `rebase` / `revert` / `reset` — three core functions, nine

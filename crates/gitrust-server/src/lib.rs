@@ -29,9 +29,9 @@ use gitrust_core::{
     rename_branch as core_rename_branch, repo_state as core_repo_state, reset as core_reset,
     resolve_file as core_resolve_file, revert as core_revert, revert_abort as core_revert_abort,
     revert_continue as core_revert_continue, revert_skip as core_revert_skip, show_blob,
-    stage_files as core_stage_files, stash_drop as core_stash_drop, stash_list as core_stash_list,
-    stash_pop as core_stash_pop, stash_save as core_stash_save, summarize_repo,
-    unstage_files as core_unstage,
+    stage_files as core_stage_files, stage_hunks as core_stage_hunks,
+    stash_drop as core_stash_drop, stash_list as core_stash_list, stash_pop as core_stash_pop,
+    stash_save as core_stash_save, summarize_repo, unstage_files as core_unstage,
 };
 
 #[derive(Serialize)]
@@ -463,6 +463,23 @@ async fn repo_resolve(Json(body): Json<ResolveBody>) -> Result<StatusCode, ApiEr
     let ResolveBody { path, file, side } = body;
     let repo = PathBuf::from(path);
     tokio::task::spawn_blocking(move || core_resolve_file(&repo, &file, &side))
+        .await
+        .map_err(|e| anyhow::anyhow!("join error: {e}"))?
+        .map_err(ApiError::from)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Deserialize)]
+struct StageHunksBody {
+    path: String,
+    file: String,
+    hunks: Vec<usize>,
+}
+
+async fn repo_stage_hunks(Json(body): Json<StageHunksBody>) -> Result<StatusCode, ApiError> {
+    let StageHunksBody { path, file, hunks } = body;
+    let repo = PathBuf::from(path);
+    tokio::task::spawn_blocking(move || core_stage_hunks(&repo, &file, &hunks))
         .await
         .map_err(|e| anyhow::anyhow!("join error: {e}"))?
         .map_err(ApiError::from)?;
@@ -1095,6 +1112,7 @@ pub fn router(source: WebSource, auth: AuthState) -> Router {
             post(repo_cherry_pick_continue),
         )
         .route("/repo/resolve", post(repo_resolve))
+        .route("/repo/stage-hunks", post(repo_stage_hunks))
         .route("/repo/rebase", post(repo_rebase))
         .route("/repo/rebase/abort", post(repo_rebase_abort))
         .route("/repo/rebase/continue", post(repo_rebase_continue))

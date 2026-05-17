@@ -774,6 +774,27 @@ branch that inverts `oid`. On conflict, `repo_state.kind` becomes
 
 Body: `{ "path": "..." }`. Same shape as rebase's resume actions.
 
+### `POST /api/repo/stage-hunks`
+
+```json
+{ "path": "...", "file": "src/main.rs", "hunks": [0, 2] }
+```
+
+Stage a subset of a modified file's hunks. `hunks` references positions
+in the array `GET /api/repo/diff/working?file=...` returns — index 0 is
+the topmost hunk. The server re-fetches that diff server-side, filters
+to the selected indices, serializes the subset to a unified-diff text,
+and pipes it through `git apply --cached --recount`.
+
+Returns `204 No Content`. The file must be `kind: "modified"` (no
+hunk-staging on untracked / deleted / binary files — those are
+all-or-nothing via the existing `/api/repo/stage`). Empty `hunks`,
+out-of-range indices, or binary file all return 400 with a
+descriptive error.
+
+The UI exposes this as per-hunk checkboxes in the working-tree diff
+viewer plus a "Stage N hunk(s)" button.
+
 ### `POST /api/repo/reset`
 
 ```json

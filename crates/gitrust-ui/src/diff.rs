@@ -2,13 +2,22 @@
 //! per-line tokens. `render_line_content` is shared with the blob viewer
 //! in `main_panel`, the rest is private.
 
+use std::collections::HashSet;
+
 use dioxus::prelude::*;
 use gitrust_types::{DiffHunk, DiffLine, FileDiff, Token};
 
 /// Files with more than this many diff lines start collapsed. Tunable.
 const AUTO_COLLAPSE_LINES: usize = 300;
 
-pub(crate) fn render_file_diff(f: FileDiff, side_by_side: bool) -> Element {
+pub(crate) fn render_file_diff(
+    f: FileDiff,
+    side_by_side: bool,
+    // When Some, every hunk header gets a checkbox bound to this signal
+    // — the caller turns the selection into a `stage-hunks` POST. Used
+    // for the working-tree-diff panel; commit-diff calls pass None.
+    hunk_picker: Option<Signal<HashSet<usize>>>,
+) -> Element {
     let path = f.path.clone();
     let old_path = f.old_path.clone();
     let kind = f.kind.clone();
@@ -51,44 +60,67 @@ pub(crate) fn render_file_diff(f: FileDiff, side_by_side: bool) -> Element {
             } else if no_hunks {
                 div { class: "binary-note", "No textual changes." }
             } else {
-                for h in hunks {
-                    {if side_by_side { render_hunk_sbs(h) } else { render_hunk(h) }}
+                for (i, h) in hunks.into_iter().enumerate() {
+                    {render_hunk_with_picker(i, h, side_by_side, hunk_picker)}
                 }
             }
         }
     }
 }
 
-fn render_hunk(h: DiffHunk) -> Element {
+fn render_hunk_with_picker(
+    idx: usize,
+    h: DiffHunk,
+    side_by_side: bool,
+    hunk_picker: Option<Signal<HashSet<usize>>>,
+) -> Element {
     let header = format!(
         "@@ -{},{} +{},{} @@",
         h.old_start, h.old_count, h.new_start, h.new_count
     );
     let lines = h.lines.clone();
+    let checked = hunk_picker
+        .as_ref()
+        .map(|p| p.read().contains(&idx))
+        .unwrap_or(false);
+    let sbs_rows = if side_by_side {
+        Some(pair_sbs_rows(lines.clone()))
+    } else {
+        None
+    };
     rsx! {
         div { class: "hunk",
-            div { class: "hunk-header", "{header}" }
-            div { class: "hunk-lines",
-                for l in lines {
-                    {render_diff_line(l)}
+            div { class: "hunk-header",
+                if let Some(mut picker) = hunk_picker {
+                    input {
+                        r#type: "checkbox",
+                        class: "hunk-pick",
+                        title: "Include this hunk in the next stage action",
+                        checked,
+                        onchange: move |e| {
+                            let mut set = picker.read().clone();
+                            if e.value() == "true" {
+                                set.insert(idx);
+                            } else {
+                                set.remove(&idx);
+                            }
+                            picker.set(set);
+                        },
+                    }
                 }
+                span { class: "hunk-header-text", "{header}" }
             }
-        }
-    }
-}
-
-fn render_hunk_sbs(h: DiffHunk) -> Element {
-    let header = format!(
-        "@@ -{},{} +{},{} @@",
-        h.old_start, h.old_count, h.new_start, h.new_count
-    );
-    let rows = pair_sbs_rows(h.lines);
-    rsx! {
-        div { class: "hunk",
-            div { class: "hunk-header", "{header}" }
-            div { class: "hunk-sbs",
-                for row in rows {
-                    {render_sbs_row(row)}
+            if let Some(rows) = sbs_rows {
+                div { class: "hunk-sbs",
+                    for row in rows {
+                        {render_sbs_row(row)}
+                    }
+                }
+            } else {
+                div { class: "hunk-lines",
+                    for l in lines {
+                        {render_diff_line(l)}
+                    }
                 }
             }
         }

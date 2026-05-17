@@ -36,6 +36,10 @@ What works today:
   modes), all reachable as buttons in the commit-detail toolbar
   so the user picks a target commit visually instead of retyping
   its oid. Reset prompts a confirm dialog on `hard` mode.
+- Hunk-level staging (`git add -p` in a UI). Working-tree diff
+  rows get a checkbox per hunk; the "Stage N hunk(s)" button
+  ships a subset patch through `git apply --cached --recount`
+  so only the ticked hunks land in the index.
 - Conflict resolution: when a merge / rebase / cherry-pick /
   revert hits a conflict, a banner above the main panel surfaces
   the in-progress state, the conflicted file list with per-file
@@ -81,6 +85,10 @@ Deferred:
 - Per-hunk conflict resolution (UI currently picks ours/theirs
   per *file*; an in-place 3-way hunk picker is the natural
   next step).
+- Unstage by hunks — symmetric counterpart to the staging flow;
+  needs a `staged-vs-HEAD` diff endpoint to feed the picker.
+- Line-level staging — checkbox per `add`/`del` line, currently
+  per-hunk only.
 - Hunk-level (and line-level) staging, à la `git add -p`.
 - Tag create / delete, file-history (log filtered to a single path),
   arbitrary-ref diff.

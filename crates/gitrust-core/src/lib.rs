@@ -1201,6 +1201,105 @@ pub fn revert_skip(repo: &Path) -> anyhow::Result<()> {
     run_git(repo, &["revert", "--skip"]).map(|_| ())
 }
 
+/// Stage a subset of a modified file's hunks. `indices` references the
+/// hunks as they appear in `diff_working(file)`. We re-fetch that diff,
+/// filter it down to the selected hunks, serialize the result back to a
+/// unified-diff text, and pipe it through `git apply --cached
+/// --recount` so only those hunks land in the index — the equivalent of
+/// hitting `y` for some hunks in `git add -p`.
+///
+/// Fails on binary files (no textual diff), on untracked / deleted
+/// files (no `modified` shape to subset), and on out-of-range indices.
+/// Empty `indices` is also an error so the caller has to be explicit
+/// rather than accidentally no-op'ing.
+pub fn stage_hunks(repo: &Path, file: &str, indices: &[usize]) -> anyhow::Result<()> {
+    if indices.is_empty() {
+        anyhow::bail!("no hunks selected");
+    }
+    let diff = diff_working(repo, file)?;
+    if diff.is_binary {
+        anyhow::bail!("cannot stage hunks of a binary file");
+    }
+    if diff.kind != "modified" {
+        anyhow::bail!(
+            "hunk-level staging only supports `modified` files; got `{}`",
+            diff.kind
+        );
+    }
+    let mut selected: Vec<&DiffHunk> = Vec::with_capacity(indices.len());
+    for &i in indices {
+        let h = diff.hunks.get(i).ok_or_else(|| {
+            anyhow::anyhow!(
+                "hunk index {i} out of range (file has {} hunks)",
+                diff.hunks.len()
+            )
+        })?;
+        selected.push(h);
+    }
+    let patch = serialize_hunks_to_patch(file, &selected);
+    apply_patch_to_index(repo, &patch)
+}
+
+/// Build a minimal `git apply`-compatible unified-diff text covering
+/// just `hunks` of `file`. We rely on `--recount` downstream so any
+/// inter-hunk line drift produced by selecting a sparse subset of
+/// hunks gets fixed up by git rather than us re-numbering by hand.
+fn serialize_hunks_to_patch(file: &str, hunks: &[&DiffHunk]) -> String {
+    let mut s = String::new();
+    s.push_str(&format!("diff --git a/{file} b/{file}\n"));
+    s.push_str(&format!("--- a/{file}\n"));
+    s.push_str(&format!("+++ b/{file}\n"));
+    for h in hunks {
+        s.push_str(&format!(
+            "@@ -{},{} +{},{} @@\n",
+            h.old_start, h.old_count, h.new_start, h.new_count
+        ));
+        for line in &h.lines {
+            let prefix = match line.kind.as_str() {
+                "add" => '+',
+                "del" => '-',
+                _ => ' ',
+            };
+            s.push(prefix);
+            s.push_str(&line.text);
+            s.push('\n');
+        }
+    }
+    s
+}
+
+/// Pipe `patch` into `git apply --cached --recount -` and surface git's
+/// own error wording on failure. Stdin is buffered, not memory-mapped,
+/// so large patches are fine.
+fn apply_patch_to_index(repo: &Path, patch: &str) -> anyhow::Result<()> {
+    use std::io::Write;
+    let mut child = std::process::Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args(["apply", "--cached", "--recount", "-"])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|e| anyhow::anyhow!("spawning `git apply --cached`: {e}"))?;
+    if let Some(mut stdin) = child.stdin.take() {
+        stdin.write_all(patch.as_bytes())?;
+    }
+    let out = child.wait_with_output()?;
+    if !out.status.success() {
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        let detail = match (stderr.trim(), stdout.trim()) {
+            ("", "") => "(no output)".to_string(),
+            ("", s) => s.to_string(),
+            (e, "") => e.to_string(),
+            (e, s) => format!("{e}\n{s}"),
+        };
+        anyhow::bail!("git apply --cached failed: {detail}");
+    }
+    Ok(())
+}
+
 /// `git reset --<mode> <target>` — move HEAD to `target`. `mode` is
 /// one of `"soft"` (keep index + worktree), `"mixed"` (reset index,
 /// keep worktree — git's default), or `"hard"` (reset everything,

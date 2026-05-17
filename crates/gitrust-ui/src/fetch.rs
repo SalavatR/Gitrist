@@ -315,6 +315,19 @@ pub(crate) async fn post_resolve(path: &str, file: &str, side: &str) -> Result<(
 }
 
 #[cfg(target_arch = "wasm32")]
+pub(crate) async fn post_stage_hunks(
+    path: &str,
+    file: &str,
+    hunks: &[usize],
+) -> Result<(), String> {
+    post_empty(
+        "/api/repo/stage-hunks",
+        serde_json::json!({ "path": path, "file": file, "hunks": hunks }),
+    )
+    .await
+}
+
+#[cfg(target_arch = "wasm32")]
 pub(crate) async fn post_rebase(path: &str, upstream: &str) -> Result<NetworkOpResult, String> {
     post_with_response(
         "/api/repo/rebase",
@@ -724,6 +737,15 @@ pub(crate) async fn post_cherry_pick_continue(_path: &str) -> Result<(), String>
 
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) async fn post_resolve(_path: &str, _file: &str, _side: &str) -> Result<(), String> {
+    Err("native build: writes not implemented".into())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) async fn post_stage_hunks(
+    _path: &str,
+    _file: &str,
+    _hunks: &[usize],
+) -> Result<(), String> {
     Err("native build: writes not implemented".into())
 }
 
