@@ -26,6 +26,19 @@ impl TestRepo {
         Self { dir }
     }
 
+    /// Bare repo, suitable as a push/fetch target for other TestRepos
+    /// via `git remote add origin <path>`. No identity / no worktree.
+    pub fn new_bare() -> Self {
+        let dir = TempDir::new().expect("create tempdir");
+        let path = dir.path();
+        run(
+            path,
+            "git",
+            &["-c", "init.defaultBranch=master", "init", "--bare", "-q"],
+        );
+        Self { dir }
+    }
+
     pub fn path(&self) -> &Path {
         self.dir.path()
     }

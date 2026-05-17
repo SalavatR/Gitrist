@@ -261,6 +261,86 @@ a:hover { text-decoration: underline; }
   color: var(--del);
 }
 
+.net-ops {
+  display: flex;
+  gap: 0.3rem;
+  margin-left: 0.6rem;
+}
+.net-btn {
+  padding: 0.4rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  color: var(--text-2);
+  cursor: pointer;
+  font-size: 0.82rem;
+  font-weight: 500;
+}
+.net-btn:hover:not(:disabled) {
+  background: var(--accent-bg);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.net-btn:disabled {
+  opacity: 0.5;
+  cursor: progress;
+}
+
+.net-banner {
+  border-bottom: 1px solid var(--border);
+  padding: 0.55rem 1rem;
+  font-size: 0.85rem;
+  background: var(--surface-2);
+}
+.net-banner.ok {
+  background: var(--add-bg, var(--surface-2));
+}
+.net-banner.err {
+  background: var(--del-bg);
+  color: var(--del);
+}
+.net-banner.muted {
+  color: var(--muted);
+  font-style: italic;
+}
+.net-banner-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.25rem;
+}
+.net-banner-head strong {
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 0.7rem;
+}
+.net-banner-head code {
+  font-size: 0.8rem;
+}
+.net-banner-dismiss {
+  margin-left: auto;
+  background: none;
+  border: none;
+  font-size: 1.1rem;
+  line-height: 1;
+  color: inherit;
+  cursor: pointer;
+  opacity: 0.6;
+  padding: 0 0.3rem;
+}
+.net-banner-dismiss:hover {
+  opacity: 1;
+}
+.net-banner-body {
+  margin: 0;
+  white-space: pre-wrap;
+  font-family: ui-monospace, "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
+  font-size: 0.78rem;
+  line-height: 1.4;
+  max-height: 8rem;
+  overflow-y: auto;
+}
+
 /* Auth gate — full-screen centered token-entry card. */
 .auth-gate {
   min-height: 100vh;

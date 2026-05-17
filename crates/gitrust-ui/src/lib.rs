@@ -3,7 +3,7 @@
 //! cheap for non-WASM contributors.
 
 use dioxus::prelude::*;
-use gitrust_types::{BlameView, BlobView, CommitDiff, FileDiff};
+use gitrust_types::{BlameView, BlobView, CommitDiff, FileDiff, NetworkOpResult};
 
 mod diff;
 mod fetch;
@@ -105,6 +105,8 @@ fn AppContent() -> Element {
     let new_branch = use_signal(String::new);
     let mut log_query = use_signal(String::new);
     let blob_query = use_signal(String::new);
+    let mut net_busy = use_signal(|| false);
+    let mut net_result = use_signal(|| None::<Result<NetworkOpResult, String>>);
 
     use_effect(move || {
         let path = current_repo.read().clone();
@@ -327,6 +329,66 @@ fn AppContent() -> Element {
                     }
                     button { r#type: "submit", "Load" }
                 }
+                {
+                    // Three POST handlers share the same shape — capture
+                    // path, flip net_busy, post, store the result. WS
+                    // push handles UI-resource refresh on success.
+                    let busy = *net_busy.read();
+                    rsx! {
+                        div { class: "net-ops",
+                            button {
+                                class: "net-btn",
+                                disabled: busy,
+                                title: "git fetch (default remote)",
+                                onclick: move |_| {
+                                    let path = current_repo.read().clone();
+                                    net_busy.set(true);
+                                    net_result.set(None);
+                                    spawn(async move {
+                                        let r = fetch::post_fetch(&path, None).await;
+                                        net_busy.set(false);
+                                        net_result.set(Some(r));
+                                    });
+                                },
+                                "Fetch"
+                            }
+                            button {
+                                class: "net-btn",
+                                disabled: busy,
+                                title: "git pull --ff-only",
+                                onclick: move |_| {
+                                    let path = current_repo.read().clone();
+                                    net_busy.set(true);
+                                    net_result.set(None);
+                                    spawn(async move {
+                                        let r = fetch::post_pull(&path, None, true).await;
+                                        net_busy.set(false);
+                                        net_result.set(Some(r));
+                                    });
+                                },
+                                "Pull"
+                            }
+                            button {
+                                class: "net-btn",
+                                disabled: busy,
+                                title: "git push (current branch to its upstream)",
+                                onclick: move |_| {
+                                    let path = current_repo.read().clone();
+                                    net_busy.set(true);
+                                    net_result.set(None);
+                                    spawn(async move {
+                                        let r = fetch::post_push(
+                                            &path, None, None, false, false,
+                                        ).await;
+                                        net_busy.set(false);
+                                        net_result.set(Some(r));
+                                    });
+                                },
+                                "Push"
+                            }
+                        }
+                    }
+                }
                 button {
                     class: "theme-toggle",
                     title: "Theme — click to cycle",
@@ -344,6 +406,52 @@ fn AppContent() -> Element {
                         *AUTH_TOKEN.write() = None;
                     },
                     "Sign out"
+                }
+            }
+
+            {
+                // Result of the last network op (fetch/pull/push). Plain
+                // <pre> so the user sees the same multi-line stderr they'd
+                // see in a terminal. A button on the right dismisses it.
+                let result = net_result.read().clone();
+                let busy = *net_busy.read();
+                match (busy, result) {
+                    (true, _) => rsx! {
+                        div { class: "net-banner muted",
+                            "Working…"
+                        }
+                    },
+                    (false, Some(Ok(r))) => rsx! {
+                        div { class: "net-banner ok",
+                            div { class: "net-banner-head",
+                                strong { "{r.op}" }
+                                if !r.remote.is_empty() {
+                                    " · "
+                                    code { "{r.remote}" }
+                                }
+                                button {
+                                    class: "net-banner-dismiss",
+                                    onclick: move |_| net_result.set(None),
+                                    "×"
+                                }
+                            }
+                            pre { class: "net-banner-body", "{r.summary}" }
+                        }
+                    },
+                    (false, Some(Err(e))) => rsx! {
+                        div { class: "net-banner err",
+                            div { class: "net-banner-head",
+                                strong { "failed" }
+                                button {
+                                    class: "net-banner-dismiss",
+                                    onclick: move |_| net_result.set(None),
+                                    "×"
+                                }
+                            }
+                            pre { class: "net-banner-body", "{e}" }
+                        }
+                    },
+                    (false, None) => rsx! {},
                 }
             }
 

@@ -27,6 +27,10 @@ What works today:
   `commit` (with body + author override), branch create / delete
   (with force fallback) / rename / checkout, and stash save /
   list / pop / drop.
+- Network ops: `fetch`, `pull` (`--ff-only` by default), and
+  `push` (`-u` / `--force-with-lease` flags optional). All shell
+  out to the user's `git` binary so SSH agents and HTTPS
+  credential helpers Just Work.
 - Web shell shows: repository summary card, commit-history table
   with a colored graph column rendering branches and merges, an
   in-history substring filter, a sidebar with branches / remotes /
@@ -56,8 +60,9 @@ What works today:
 
 Deferred:
 
-- Network ops: `fetch`, `pull`, `push`. Need credentials handling
-  (SSH agent + HTTPS keychain) and a streaming progress channel.
+- Streaming progress for long fetch/push (current implementation
+  blocks until the git CLI completes; UI shows "Working…" the
+  whole time).
 - Merge / rebase / cherry-pick and a conflict-resolution UI.
 - Reset / revert.
 - Hunk-level (and line-level) staging, à la `git add -p`.

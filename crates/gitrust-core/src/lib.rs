@@ -7,8 +7,8 @@ use gix::diff::blob::{Algorithm, InternedInput, Token as IDToken};
 
 pub use gitrust_types::{
     BlameLine, BlameView, BlobLine, BlobView, BranchInfo, CommitDiff, CommitInfo, DiffHunk,
-    DiffLine, FileDiff, RemoteBranchInfo, RepoSummary, StashEntry, StatusEntry, TagInfo, Token,
-    TreeEntry,
+    DiffLine, FileDiff, NetworkOpResult, RemoteBranchInfo, RepoSummary, StashEntry, StatusEntry,
+    TagInfo, Token, TreeEntry,
 };
 
 fn build_commit_info(repo: &gix::Repository, oid: gix::ObjectId) -> anyhow::Result<CommitInfo> {
@@ -978,4 +978,97 @@ pub fn commit(repo: &Path, message: &str, author: Option<&str>) -> anyhow::Resul
     let out = run_git(repo, &["rev-parse", "HEAD"])?;
     let oid = String::from_utf8_lossy(&out.stdout).trim().to_string();
     Ok(oid)
+}
+
+/// `git fetch [remote]` — sync remote-tracking refs without touching
+/// HEAD. `remote` empty/None lets git pick the current branch's
+/// upstream (or `origin` if it's not configured). Auth (SSH keys,
+/// HTTPS credential helpers) comes from the user's existing git
+/// config — we run the same `git` binary they would on the CLI.
+pub fn fetch(repo: &Path, remote: Option<&str>) -> anyhow::Result<NetworkOpResult> {
+    let trimmed = remote.map(str::trim).filter(|s| !s.is_empty());
+    let mut args: Vec<&str> = vec!["fetch", "--no-progress"];
+    if let Some(r) = trimmed {
+        args.push(r);
+    }
+    let out = run_git(repo, &args)?;
+    Ok(NetworkOpResult {
+        op: "fetch".into(),
+        remote: trimmed.unwrap_or("").into(),
+        summary: format_network_output(&out, "fetched (already up to date)"),
+    })
+}
+
+/// `git pull [--ff-only|--no-rebase] [remote]` — fetch + integrate.
+/// `ff_only: true` is the safe default — refuses anything that
+/// isn't a clean fast-forward (no merge commit, no rebase, leaves
+/// the worktree alone on failure). `ff_only: false` lets git's
+/// configured `pull.rebase` setting decide; on conflict the user
+/// has to resolve via the CLI.
+pub fn pull(repo: &Path, remote: Option<&str>, ff_only: bool) -> anyhow::Result<NetworkOpResult> {
+    let trimmed = remote.map(str::trim).filter(|s| !s.is_empty());
+    let mut args: Vec<&str> = vec!["pull", "--no-progress"];
+    if ff_only {
+        args.push("--ff-only");
+    }
+    if let Some(r) = trimmed {
+        args.push(r);
+    }
+    let out = run_git(repo, &args)?;
+    Ok(NetworkOpResult {
+        op: "pull".into(),
+        remote: trimmed.unwrap_or("").into(),
+        summary: format_network_output(&out, "already up to date"),
+    })
+}
+
+/// `git push [-u] [--force-with-lease] [remote [refspec]]` — upload
+/// objects and update remote refs. `force_with_lease` is the safe
+/// flavour of `--force` that refuses to overwrite refs the local
+/// side hasn't seen yet. `set_upstream` is `-u`: also write the
+/// remote-tracking ref so future `git push` / `git pull` without
+/// arguments target this remote+branch.
+pub fn push(
+    repo: &Path,
+    remote: Option<&str>,
+    refspec: Option<&str>,
+    force_with_lease: bool,
+    set_upstream: bool,
+) -> anyhow::Result<NetworkOpResult> {
+    let trimmed_remote = remote.map(str::trim).filter(|s| !s.is_empty());
+    let trimmed_refspec = refspec.map(str::trim).filter(|s| !s.is_empty());
+    let mut args: Vec<&str> = vec!["push", "--no-progress"];
+    if set_upstream {
+        args.push("-u");
+    }
+    if force_with_lease {
+        args.push("--force-with-lease");
+    }
+    if let Some(r) = trimmed_remote {
+        args.push(r);
+        if let Some(rs) = trimmed_refspec {
+            args.push(rs);
+        }
+    }
+    let out = run_git(repo, &args)?;
+    Ok(NetworkOpResult {
+        op: "push".into(),
+        remote: trimmed_remote.unwrap_or("").into(),
+        summary: format_network_output(&out, "everything up to date"),
+    })
+}
+
+/// git emits its progress / informational messages on stderr (success
+/// AND failure), so we surface stderr first and fold in stdout when
+/// non-empty. `fallback` is used when both streams come back blank —
+/// happens on "already up to date" fetches.
+fn format_network_output(out: &std::process::Output, fallback: &str) -> String {
+    let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
+    let stdout = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    match (stderr.is_empty(), stdout.is_empty()) {
+        (true, true) => fallback.to_string(),
+        (true, false) => stdout,
+        (false, true) => stderr,
+        (false, false) => format!("{stderr}\n{stdout}"),
+    }
 }

@@ -4,8 +4,8 @@
 //! only needs the crate to compile for `cargo check` / docs).
 
 use gitrust_types::{
-    BlameView, BlobView, BranchInfo, CommitDiff, CommitInfo, FileDiff, RemoteBranchInfo,
-    RepoSummary, StashEntry, StatusEntry, TagInfo, TreeEntry,
+    BlameView, BlobView, BranchInfo, CommitDiff, CommitInfo, FileDiff, NetworkOpResult,
+    RemoteBranchInfo, RepoSummary, StashEntry, StatusEntry, TagInfo, TreeEntry,
 };
 
 // `q` percent-encodes a single query-string value. Paths can contain
@@ -195,6 +195,53 @@ pub(crate) async fn post_branch_rename(path: &str, old: &str, new: &str) -> Resu
         serde_json::json!({ "path": path, "old": old, "new": new }),
     )
     .await
+}
+
+#[cfg(target_arch = "wasm32")]
+pub(crate) async fn post_fetch(
+    path: &str,
+    remote: Option<&str>,
+) -> Result<NetworkOpResult, String> {
+    let mut body = serde_json::json!({ "path": path });
+    if let Some(r) = remote.filter(|s| !s.trim().is_empty()) {
+        body["remote"] = serde_json::Value::String(r.to_string());
+    }
+    post_with_response("/api/repo/fetch", body).await
+}
+
+#[cfg(target_arch = "wasm32")]
+pub(crate) async fn post_pull(
+    path: &str,
+    remote: Option<&str>,
+    ff_only: bool,
+) -> Result<NetworkOpResult, String> {
+    let mut body = serde_json::json!({ "path": path, "ff_only": ff_only });
+    if let Some(r) = remote.filter(|s| !s.trim().is_empty()) {
+        body["remote"] = serde_json::Value::String(r.to_string());
+    }
+    post_with_response("/api/repo/pull", body).await
+}
+
+#[cfg(target_arch = "wasm32")]
+pub(crate) async fn post_push(
+    path: &str,
+    remote: Option<&str>,
+    refspec: Option<&str>,
+    force_with_lease: bool,
+    set_upstream: bool,
+) -> Result<NetworkOpResult, String> {
+    let mut body = serde_json::json!({
+        "path": path,
+        "force_with_lease": force_with_lease,
+        "set_upstream": set_upstream,
+    });
+    if let Some(r) = remote.filter(|s| !s.trim().is_empty()) {
+        body["remote"] = serde_json::Value::String(r.to_string());
+    }
+    if let Some(rs) = refspec.filter(|s| !s.trim().is_empty()) {
+        body["refspec"] = serde_json::Value::String(rs.to_string());
+    }
+    post_with_response("/api/repo/push", body).await
 }
 
 /// Pops the native folder picker on the server side (via `rfd`) and
@@ -461,5 +508,33 @@ pub(crate) async fn post_branch_rename(_path: &str, _old: &str, _new: &str) -> R
 
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) async fn post_pick_folder() -> Result<Option<String>, String> {
+    Err("native build: writes not implemented".into())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) async fn post_fetch(
+    _path: &str,
+    _remote: Option<&str>,
+) -> Result<NetworkOpResult, String> {
+    Err("native build: writes not implemented".into())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) async fn post_pull(
+    _path: &str,
+    _remote: Option<&str>,
+    _ff_only: bool,
+) -> Result<NetworkOpResult, String> {
+    Err("native build: writes not implemented".into())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) async fn post_push(
+    _path: &str,
+    _remote: Option<&str>,
+    _refspec: Option<&str>,
+    _force_with_lease: bool,
+    _set_upstream: bool,
+) -> Result<NetworkOpResult, String> {
     Err("native build: writes not implemented".into())
 }

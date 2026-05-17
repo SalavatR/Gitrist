@@ -622,3 +622,195 @@ fn commit_info_rejects_garbage_oid() {
         "expected helpful oid error, got `{err}`"
     );
 }
+
+#[test]
+fn push_publishes_to_a_bare_remote() {
+    let bare = TestRepo::new_bare();
+    let work = TestRepo::new();
+    work.write("a.txt", "v1\n");
+    work.git(&["add", "a.txt"]);
+    work.git(&["commit", "-q", "-m", "init"]);
+    work.git(&[
+        "remote",
+        "add",
+        "origin",
+        &bare.path().display().to_string(),
+    ]);
+
+    let result =
+        gitrust_core::push(work.path(), Some("origin"), Some("master"), false, true).expect("push");
+    assert_eq!(result.op, "push");
+    assert_eq!(result.remote, "origin");
+    assert!(!result.summary.is_empty());
+
+    // The bare side now resolves master to the same oid the worktree has.
+    let local_head = work.git(&["rev-parse", "HEAD"]);
+    let bare_master = run_git_str(bare.path(), &["rev-parse", "master"]);
+    assert_eq!(local_head.trim(), bare_master.trim());
+}
+
+#[test]
+fn fetch_advances_remote_tracking_ref_after_a_separate_push() {
+    let bare = TestRepo::new_bare();
+
+    // Cloner A: seed the bare with an initial commit.
+    let alpha = TestRepo::new();
+    alpha.write("seed", "1\n");
+    alpha.git(&["add", "seed"]);
+    alpha.git(&["commit", "-q", "-m", "alpha first"]);
+    alpha.git(&[
+        "remote",
+        "add",
+        "origin",
+        &bare.path().display().to_string(),
+    ]);
+    alpha.git(&["push", "-q", "-u", "origin", "master"]);
+
+    // Cloner B: also tracks the bare; will fetch what alpha pushes next.
+    let beta = TestRepo::new();
+    beta.git(&[
+        "remote",
+        "add",
+        "origin",
+        &bare.path().display().to_string(),
+    ]);
+    beta.git(&["fetch", "-q", "origin"]);
+    let before = beta.git(&["rev-parse", "origin/master"]).trim().to_string();
+
+    // Alpha lands a new commit on origin.
+    alpha.write("seed", "2\n");
+    alpha.git(&["add", "seed"]);
+    alpha.git(&["commit", "-q", "-m", "alpha second"]);
+    alpha.git(&["push", "-q", "origin", "master"]);
+
+    // Beta does the fetch under test.
+    let result = gitrust_core::fetch(beta.path(), Some("origin")).expect("fetch");
+    assert_eq!(result.op, "fetch");
+    assert_eq!(result.remote, "origin");
+
+    let after = beta.git(&["rev-parse", "origin/master"]).trim().to_string();
+    assert_ne!(before, after, "fetch should have updated origin/master");
+    let alpha_head = alpha.git(&["rev-parse", "HEAD"]).trim().to_string();
+    assert_eq!(after, alpha_head);
+}
+
+#[test]
+fn pull_fast_forwards_when_remote_advanced() {
+    let bare = TestRepo::new_bare();
+
+    let alpha = TestRepo::new();
+    alpha.write("seed", "1\n");
+    alpha.git(&["add", "seed"]);
+    alpha.git(&["commit", "-q", "-m", "alpha first"]);
+    alpha.git(&[
+        "remote",
+        "add",
+        "origin",
+        &bare.path().display().to_string(),
+    ]);
+    alpha.git(&["push", "-q", "-u", "origin", "master"]);
+
+    // Beta clones the bare so its master tracks origin/master.
+    let beta_tempdir = tempfile::TempDir::new().expect("tempdir");
+    run_git_str(
+        beta_tempdir.path(),
+        &["clone", "-q", &bare.path().display().to_string(), "."],
+    );
+    // Honor the same identity convention as TestRepo for follow-up commits
+    // (none here, but symmetrical with the rest of the fixture).
+    run_git_str(beta_tempdir.path(), &["config", "user.name", "Test"]);
+    run_git_str(
+        beta_tempdir.path(),
+        &["config", "user.email", "test@example.com"],
+    );
+    let beta_path = beta_tempdir.path();
+    let before = run_git_str(beta_path, &["rev-parse", "HEAD"])
+        .trim()
+        .to_string();
+
+    // Alpha pushes a new commit.
+    alpha.write("seed", "2\n");
+    alpha.git(&["add", "seed"]);
+    alpha.git(&["commit", "-q", "-m", "alpha second"]);
+    alpha.git(&["push", "-q", "origin", "master"]);
+    let alpha_head = alpha.git(&["rev-parse", "HEAD"]).trim().to_string();
+
+    // Beta pulls — fast-forward only is fine because beta has no local commits.
+    let result = gitrust_core::pull(beta_path, Some("origin"), true).expect("pull");
+    assert_eq!(result.op, "pull");
+    let after = run_git_str(beta_path, &["rev-parse", "HEAD"])
+        .trim()
+        .to_string();
+    assert_ne!(before, after);
+    assert_eq!(after, alpha_head);
+}
+
+#[test]
+fn pull_ff_only_refuses_diverged_history() {
+    let bare = TestRepo::new_bare();
+
+    let alpha = TestRepo::new();
+    alpha.write("seed", "1\n");
+    alpha.git(&["add", "seed"]);
+    alpha.git(&["commit", "-q", "-m", "shared"]);
+    alpha.git(&[
+        "remote",
+        "add",
+        "origin",
+        &bare.path().display().to_string(),
+    ]);
+    alpha.git(&["push", "-q", "-u", "origin", "master"]);
+
+    // Beta diverges with its own commit on top of the shared base.
+    let beta_tempdir = tempfile::TempDir::new().expect("tempdir");
+    run_git_str(
+        beta_tempdir.path(),
+        &["clone", "-q", &bare.path().display().to_string(), "."],
+    );
+    run_git_str(beta_tempdir.path(), &["config", "user.name", "Test"]);
+    run_git_str(
+        beta_tempdir.path(),
+        &["config", "user.email", "test@example.com"],
+    );
+    std::fs::write(beta_tempdir.path().join("local.txt"), "beta\n").unwrap();
+    run_git_str(beta_tempdir.path(), &["add", "local.txt"]);
+    run_git_str(
+        beta_tempdir.path(),
+        &["commit", "-q", "-m", "beta diverges"],
+    );
+
+    // Alpha lands an incompatible commit on origin.
+    alpha.write("seed", "2\n");
+    alpha.git(&["add", "seed"]);
+    alpha.git(&["commit", "-q", "-m", "alpha advances"]);
+    alpha.git(&["push", "-q", "origin", "master"]);
+
+    let err = gitrust_core::pull(beta_tempdir.path(), Some("origin"), true)
+        .expect_err("ff-only must refuse a non-ff merge");
+    assert!(
+        err.to_string().to_lowercase().contains("non-fast-forward")
+            || err
+                .to_string()
+                .to_lowercase()
+                .contains("not possible to fast-forward"),
+        "expected ff-only refusal, got `{err}`"
+    );
+}
+
+/// Local replica of `run_git` for tests that need to drive a non-TestRepo
+/// directory (e.g. a `git clone`d worktree we created via tempfile).
+fn run_git_str(cwd: &std::path::Path, args: &[&str]) -> String {
+    let out = std::process::Command::new("git")
+        .args(args)
+        .current_dir(cwd)
+        .output()
+        .unwrap_or_else(|e| panic!("spawn git: {e}"));
+    if !out.status.success() {
+        panic!(
+            "git {args:?} failed (status {})\nstderr: {}",
+            out.status,
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+    String::from_utf8(out.stdout).unwrap_or_default()
+}

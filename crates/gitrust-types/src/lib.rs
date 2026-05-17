@@ -159,3 +159,20 @@ pub struct BlameView {
     pub path: String,
     pub lines: Vec<BlameLine>,
 }
+
+/// Result of a network operation (`fetch`, `pull`, `push`). `summary`
+/// is the human-readable output the git CLI produced (mostly stderr;
+/// stdout appended when non-empty). UIs surface it as-is so the user
+/// gets the same feedback they'd see in a terminal.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct NetworkOpResult {
+    /// `"fetch"` | `"pull"` | `"push"`.
+    pub op: String,
+    /// The remote we operated on; empty string when the caller let git
+    /// pick the default (e.g. the current branch's upstream).
+    pub remote: String,
+    /// Combined output. Always non-empty: on a no-op `git fetch` that
+    /// printed nothing, this falls back to a synthetic "already up to
+    /// date" line so the UI can confirm something happened.
+    pub summary: String,
+}

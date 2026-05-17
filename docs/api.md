@@ -650,6 +650,71 @@ list and the worktree is partially merged.
 
 `git stash drop stash@{index}`. Discards without applying.
 
+### `POST /api/repo/fetch`
+
+```json
+{ "path": "...", "remote": "origin" }
+```
+
+Returns:
+
+```json
+{
+  "op": "fetch",
+  "remote": "origin",
+  "summary": "From github.com:owner/repo\n   1234567..89abcde  master -> origin/master"
+}
+```
+
+Shells out to `git fetch --no-progress [remote]`. `remote` is optional —
+omit it (or pass `null` / empty string) to let git use the current
+branch's upstream. Auth (SSH keys, HTTPS credential helpers) comes from
+the same `~/.gitconfig` / `~/.ssh` / OS keychain the user's CLI uses.
+
+On success: `200 OK` with the result envelope above. `summary` carries
+the combined stderr+stdout (mostly stderr, which is where git puts its
+"From … master -> origin/master" lines). When the fetch was a no-op the
+summary falls back to `"fetched (already up to date)"`.
+
+On failure: the regular error envelope with whatever git reported,
+typically a 400 `generic` for network/auth issues — the human-readable
+message in `error` carries git's own wording.
+
+### `POST /api/repo/pull`
+
+```json
+{ "path": "...", "remote": "origin", "ff_only": true }
+```
+
+Returns the same `NetworkOpResult` shape as `/fetch`. Defaults to
+`ff_only: true` — a safe pull that refuses anything other than a clean
+fast-forward (no merge commit, no rebase, leaves the worktree alone on
+failure). Pass `false` to let git's configured `pull.rebase` / `pull.ff`
+decide. On a non-fast-forward refusal the error envelope carries the
+standard "Not possible to fast-forward, aborting." line.
+
+### `POST /api/repo/push`
+
+```json
+{
+  "path": "...",
+  "remote": "origin",
+  "refspec": "master",
+  "force_with_lease": false,
+  "set_upstream": false
+}
+```
+
+Returns the `NetworkOpResult`. `remote` and `refspec` are optional —
+omit both to let git use the current branch's tracked upstream. Flags:
+
+- `set_upstream: true` adds `-u`, writing the remote-tracking ref so
+  future `git push` / `git pull` without arguments target this
+  remote+branch.
+- `force_with_lease: true` adds `--force-with-lease`, the safe flavour
+  of `--force` that refuses to overwrite refs the local side hasn't
+  seen yet.
+
 ### `POST /api/repo/pick-folder` (desktop only)
 
 Pops the OS-native folder picker (`NSOpenPanel` on macOS, the

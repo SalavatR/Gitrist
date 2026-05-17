@@ -15,12 +15,13 @@ use tower_http::services::ServeDir;
 use tower_http::trace::TraceLayer;
 
 use gitrust_core::{
-    BlameView, BlobView, BranchInfo, CommitDiff, CommitInfo, FileDiff, RemoteBranchInfo,
-    RepoSummary, StashEntry, StatusEntry, TagInfo, TreeEntry, blame_file,
+    BlameView, BlobView, BranchInfo, CommitDiff, CommitInfo, FileDiff, NetworkOpResult,
+    RemoteBranchInfo, RepoSummary, StashEntry, StatusEntry, TagInfo, TreeEntry, blame_file,
     checkout as core_checkout, commit as core_commit, commit_info,
     create_branch as core_create_branch, delete_branch as core_delete_branch, diff_commit,
-    diff_working, discard_files, list_branches, list_remote_branches, list_staged, list_status,
-    list_tags, list_tree, log_commits, rename_branch as core_rename_branch, show_blob,
+    diff_working, discard_files, fetch as core_fetch, list_branches, list_remote_branches,
+    list_staged, list_status, list_tags, list_tree, log_commits, pull as core_pull,
+    push as core_push, rename_branch as core_rename_branch, show_blob,
     stage_files as core_stage_files, stash_drop as core_stash_drop, stash_list as core_stash_list,
     stash_pop as core_stash_pop, stash_save as core_stash_save, summarize_repo,
     unstage_files as core_unstage,
@@ -337,6 +338,89 @@ async fn repo_stash_drop(Json(body): Json<StashIndexBody>) -> Result<StatusCode,
         .map_err(|e| anyhow::anyhow!("join error: {e}"))?
         .map_err(ApiError::from)?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Deserialize)]
+struct FetchBody {
+    path: String,
+    #[serde(default)]
+    remote: Option<String>,
+}
+
+async fn repo_fetch(Json(body): Json<FetchBody>) -> Result<Json<NetworkOpResult>, ApiError> {
+    let FetchBody { path, remote } = body;
+    let repo = PathBuf::from(path);
+    let result = tokio::task::spawn_blocking(move || core_fetch(&repo, remote.as_deref()))
+        .await
+        .map_err(|e| anyhow::anyhow!("join error: {e}"))?
+        .map_err(ApiError::from)?;
+    Ok(Json(result))
+}
+
+#[derive(Deserialize)]
+struct PullBody {
+    path: String,
+    #[serde(default)]
+    remote: Option<String>,
+    /// Default `true` — refuse non-fast-forward integrations. Pass
+    /// `false` to let git's configured `pull.rebase`/`pull.ff` decide.
+    #[serde(default = "default_true")]
+    ff_only: bool,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+async fn repo_pull(Json(body): Json<PullBody>) -> Result<Json<NetworkOpResult>, ApiError> {
+    let PullBody {
+        path,
+        remote,
+        ff_only,
+    } = body;
+    let repo = PathBuf::from(path);
+    let result = tokio::task::spawn_blocking(move || core_pull(&repo, remote.as_deref(), ff_only))
+        .await
+        .map_err(|e| anyhow::anyhow!("join error: {e}"))?
+        .map_err(ApiError::from)?;
+    Ok(Json(result))
+}
+
+#[derive(Deserialize)]
+struct PushBody {
+    path: String,
+    #[serde(default)]
+    remote: Option<String>,
+    #[serde(default)]
+    refspec: Option<String>,
+    #[serde(default)]
+    force_with_lease: bool,
+    #[serde(default)]
+    set_upstream: bool,
+}
+
+async fn repo_push(Json(body): Json<PushBody>) -> Result<Json<NetworkOpResult>, ApiError> {
+    let PushBody {
+        path,
+        remote,
+        refspec,
+        force_with_lease,
+        set_upstream,
+    } = body;
+    let repo = PathBuf::from(path);
+    let result = tokio::task::spawn_blocking(move || {
+        core_push(
+            &repo,
+            remote.as_deref(),
+            refspec.as_deref(),
+            force_with_lease,
+            set_upstream,
+        )
+    })
+    .await
+    .map_err(|e| anyhow::anyhow!("join error: {e}"))?
+    .map_err(ApiError::from)?;
+    Ok(Json(result))
 }
 
 /// Open the OS-native folder picker (NSOpenPanel on macOS, the GTK
@@ -776,7 +860,10 @@ pub fn router(source: WebSource, auth: AuthState) -> Router {
         .route("/repo/branches/create", post(repo_branch_create))
         .route("/repo/branches/delete", post(repo_branch_delete))
         .route("/repo/branches/rename", post(repo_branch_rename))
-        .route("/repo/checkout", post(repo_checkout));
+        .route("/repo/checkout", post(repo_checkout))
+        .route("/repo/fetch", post(repo_fetch))
+        .route("/repo/pull", post(repo_pull))
+        .route("/repo/push", post(repo_push));
 
     #[cfg(feature = "desktop")]
     let protected = protected.route("/repo/pick-folder", post(pick_folder));

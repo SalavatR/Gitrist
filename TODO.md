@@ -216,6 +216,20 @@ within each section.
       arrives within the debounce window. UI snapshot tests not
       yet (no Dioxus story support that I've found).
 
+## Network ops
+
+- [x] `fetch` / `pull` / `push` via the user's `git` binary. Core
+      functions in `gitrust-core` shell out (same pattern as
+      `blame`, `stash`), server exposes them as POST endpoints, UI
+      gets three buttons in the topbar with a result banner showing
+      git's own stderr verbatim. Auth (SSH keys, HTTPS credential
+      helpers) lives entirely in the user's existing git config;
+      we don't reinvent credential handling. `pull` defaults to
+      `--ff-only` for safety; `push` exposes `-u` / `--force-with-lease`
+      as request flags. Live progress streaming and conflict UI are
+      separate milestones — for now the UI shows a "Working…" banner
+      and the final result envelope.
+
 ## Visualization
 
 - [x] Commit graph column next to the log table. Client-side lane
