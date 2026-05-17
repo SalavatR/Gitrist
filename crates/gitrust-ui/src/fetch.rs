@@ -507,15 +507,35 @@ fn current_token() -> String {
 #[cfg(target_arch = "wasm32")]
 async fn fetch_json<T: serde::de::DeserializeOwned>(url: &str) -> Result<T, String> {
     let token = current_token();
-    let resp = gloo_net::http::Request::get(url)
-        .header("Authorization", &format!("Bearer {token}"))
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
-    if !resp.ok() {
-        return Err(extract_error(resp).await);
+    // Retry once on a transient `Failed to fetch` — that surfaces when
+    // the browser throttles a backgrounded tab and the WS / fetch
+    // connection is half-dead until focus comes back. A 200 ms pause
+    // is enough for the browser to re-warm the connection.
+    let mut last_err: Option<String> = None;
+    for attempt in 0..2 {
+        let send = gloo_net::http::Request::get(url)
+            .header("Authorization", &format!("Bearer {token}"))
+            .send()
+            .await;
+        match send {
+            Ok(resp) => {
+                if !resp.ok() {
+                    return Err(extract_error(resp).await);
+                }
+                return resp.json::<T>().await.map_err(|e| e.to_string());
+            }
+            Err(e) => {
+                let msg = e.to_string();
+                if attempt == 0 && msg.contains("Failed to fetch") {
+                    gloo_timers::future::TimeoutFuture::new(200).await;
+                    continue;
+                }
+                last_err = Some(msg);
+                break;
+            }
+        }
     }
-    resp.json::<T>().await.map_err(|e| e.to_string())
+    Err(last_err.unwrap_or_else(|| "fetch failed".into()))
 }
 
 #[cfg(target_arch = "wasm32")]

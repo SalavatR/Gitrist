@@ -203,7 +203,11 @@ fn AppContent() -> Element {
     // the user signs out and back in.
     let repos = use_resource(|| async move { fetch_repos().await });
 
-    // Polling stays as a silent fallback — WS push is the primary path.
+    // Polling stays as a silent fallback — WS push is the primary path,
+    // but backgrounded browser tabs throttle the WS into a dead state
+    // and any user action after focus-returning would otherwise stick
+    // until the user manually reloads. The poll covers every user-
+    // visible resource so a missed WS frame doesn't leave the UI stuck.
     use_future(move || async move {
         loop {
             sleep_ms(STATUS_POLL_INTERVAL_MS).await;
@@ -211,10 +215,23 @@ fn AppContent() -> Element {
         }
     });
     use_future(move || async move {
+        let mut staged = staged;
+        let mut branches = branches;
+        let mut remotes = remotes;
+        let mut tags = tags;
+        let mut tree = tree;
+        let mut stashes = stashes;
         loop {
             sleep_ms(REFS_POLL_INTERVAL_MS).await;
             summary.restart();
             log.restart();
+            staged.restart();
+            branches.restart();
+            remotes.restart();
+            tags.restart();
+            tree.restart();
+            stashes.restart();
+            state.restart();
         }
     });
 
