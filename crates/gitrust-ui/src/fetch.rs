@@ -22,6 +22,68 @@ pub(crate) async fn fetch_repos() -> Result<Vec<RepoEntry>, String> {
     fetch_json("/api/repos").await
 }
 
+// `fetch_log_file` and `fetch_diff_refs` wrap the new endpoints. The
+// in-tree UI doesn't surface them yet — file-history / ref-diff views
+// are queued as the next UI pass — but the wrappers exist so callers
+// (and any out-of-tree consumers, e.g. curl-style scripting in the
+// browser console) have parity with the API surface.
+#[cfg(target_arch = "wasm32")]
+#[allow(dead_code)]
+pub(crate) async fn fetch_log_file(
+    path: &str,
+    file: &str,
+    limit: usize,
+) -> Result<Vec<CommitInfo>, String> {
+    fetch_json(&format!(
+        "/api/repo/log-file?path={}&file={}&limit={limit}",
+        q(path),
+        q(file),
+    ))
+    .await
+}
+
+#[cfg(target_arch = "wasm32")]
+#[allow(dead_code)]
+pub(crate) async fn fetch_diff_refs(
+    path: &str,
+    from: &str,
+    to: &str,
+) -> Result<Vec<FileDiff>, String> {
+    fetch_json(&format!(
+        "/api/repo/diff/refs?path={}&from={}&to={}",
+        q(path),
+        q(from),
+        q(to),
+    ))
+    .await
+}
+
+#[cfg(target_arch = "wasm32")]
+pub(crate) async fn post_tag_create(
+    path: &str,
+    name: &str,
+    target: Option<&str>,
+    message: Option<&str>,
+) -> Result<(), String> {
+    let mut body = serde_json::json!({ "path": path, "name": name });
+    if let Some(t) = target.filter(|s| !s.trim().is_empty()) {
+        body["target"] = serde_json::Value::String(t.to_string());
+    }
+    if let Some(m) = message.filter(|s| !s.trim().is_empty()) {
+        body["message"] = serde_json::Value::String(m.to_string());
+    }
+    post_empty("/api/repo/tags/create", body).await
+}
+
+#[cfg(target_arch = "wasm32")]
+pub(crate) async fn post_tag_delete(path: &str, name: &str) -> Result<(), String> {
+    post_empty(
+        "/api/repo/tags/delete",
+        serde_json::json!({ "path": path, "name": name }),
+    )
+    .await
+}
+
 #[cfg(target_arch = "wasm32")]
 pub(crate) async fn fetch_summary(path: &str) -> Result<RepoSummary, String> {
     fetch_json(&format!("/api/repo/summary?path={}", q(path))).await
@@ -535,6 +597,26 @@ async fn extract_error(resp: gloo_net::http::Response) -> String {
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) async fn fetch_repos() -> Result<Vec<RepoEntry>, String> {
     Err("native build: fetching not implemented".into())
+}
+
+// No native stubs for `fetch_log_file` / `fetch_diff_refs` — they are
+// only called from the wasm-only UI surface (queued for the next pass)
+// and adding `pub(crate)` stubs here just creates unused-fn warnings
+// the native `cargo check` doesn't have a good place to silence.
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) async fn post_tag_create(
+    _path: &str,
+    _name: &str,
+    _target: Option<&str>,
+    _message: Option<&str>,
+) -> Result<(), String> {
+    Err("native build: writes not implemented".into())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) async fn post_tag_delete(_path: &str, _name: &str) -> Result<(), String> {
+    Err("native build: writes not implemented".into())
 }
 
 #[cfg(not(target_arch = "wasm32"))]

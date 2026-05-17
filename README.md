@@ -46,6 +46,14 @@ What works today:
   Workspaces sidebar block at the top, clicking switches the
   active repo. Without `--root` the block stays hidden and the
   classic single-repo path-input flow is unchanged.
+- Tag CRUD — the Tags sidebar grew a "New tag at HEAD" input
+  and per-tag `×` delete (with confirm). Annotated tags via
+  the dedicated `/api/repo/tags/create` body field.
+- File-history endpoint (`GET /api/repo/log-file?file=…`),
+  follows renames via `git log --follow`. UI surface for it
+  is queued.
+- Arbitrary-ref diff endpoint (`GET /api/repo/diff/refs?from=&to=`),
+  same `FileDiff[]` shape as commit diffs. UI surface queued.
 - Conflict resolution: when a merge / rebase / cherry-pick /
   revert hits a conflict, a banner above the main panel surfaces
   the in-progress state, the conflicted file list with per-file
@@ -99,6 +107,9 @@ Deferred:
   workspace scanner reports discovered repos but the path-based
   endpoints still accept any absolute path. Localhost-only + the
   bearer token make this acceptable for v1.
+- UI surface for file-history (`/api/repo/log-file`) and
+  arbitrary-ref diff (`/api/repo/diff/refs`) — endpoints exist,
+  the visible surface is the next polish pass.
 - Hunk-level (and line-level) staging, à la `git add -p`.
 - Tag create / delete, file-history (log filtered to a single path),
   arbitrary-ref diff.

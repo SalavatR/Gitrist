@@ -287,28 +287,50 @@ pub(crate) fn render_branches(
 pub(crate) fn render_tags(
     state: &Option<Result<Vec<TagInfo>, String>>,
     mut res: Resource<Result<Vec<TagInfo>, String>>,
+    mut tags_res: Resource<Result<Vec<TagInfo>, String>>,
+    current_repo: Signal<String>,
+    mut new_tag_name: Signal<String>,
 ) -> Element {
-    match state {
-        Some(Ok(tags)) if tags.is_empty() => {
-            rsx! { p { class: "muted small", "No tags." } }
-        }
+    let body = match state {
+        Some(Ok(tags)) if tags.is_empty() => rsx! { p { class: "muted small", "No tags." } },
         Some(Ok(tags)) => {
             let rows = tags.clone();
             rsx! {
                 ul { class: "branch-list",
                     for t in rows {
-                        li { key: "{t.name}",
-                            span {
-                                class: if t.annotated { "marker tag annotated" } else { "marker tag" },
-                                if t.annotated { "❖" } else { "◆" }
-                            }
-                            span { class: "name", "{t.name}" }
-                            span { class: "oid",
-                                {
-                                    t.oid
-                                        .as_ref()
-                                        .map(|o| o.chars().take(7).collect::<String>())
-                                        .unwrap_or_else(|| "—".to_string())
+                        {
+                            let name_for_del = t.name.clone();
+                            rsx! {
+                                li { key: "{t.name}",
+                                    span {
+                                        class: if t.annotated { "marker tag annotated" } else { "marker tag" },
+                                        if t.annotated { "❖" } else { "◆" }
+                                    }
+                                    span { class: "name", "{t.name}" }
+                                    span { class: "oid",
+                                        {
+                                            t.oid
+                                                .as_ref()
+                                                .map(|o| o.chars().take(7).collect::<String>())
+                                                .unwrap_or_else(|| "—".to_string())
+                                        }
+                                    }
+                                    button {
+                                        class: "row-action delete",
+                                        title: "Delete this tag",
+                                        onclick: move |_| {
+                                            let name = name_for_del.clone();
+                                            if !browser_confirm(&format!("Delete tag `{name}`?")) {
+                                                return;
+                                            }
+                                            let path = current_repo.read().clone();
+                                            spawn(async move {
+                                                let _ = crate::fetch::post_tag_delete(&path, &name).await;
+                                                tags_res.restart();
+                                            });
+                                        },
+                                        "×"
+                                    }
                                 }
                             }
                         }
@@ -326,6 +348,37 @@ pub(crate) fn render_tags(
             }
         }
         None => rsx! { p { class: "muted small", "Loading…" } },
+    };
+    let name_value = new_tag_name.read().clone();
+    let can_create = !name_value.trim().is_empty();
+    rsx! {
+        {body}
+        form {
+            class: "branch-create",
+            onsubmit: move |e| {
+                e.prevent_default();
+                let name = new_tag_name.read().trim().to_string();
+                if name.is_empty() {
+                    return;
+                }
+                let path = current_repo.read().clone();
+                spawn(async move {
+                    let _ = crate::fetch::post_tag_create(&path, &name, None, None).await;
+                    tags_res.restart();
+                    new_tag_name.set(String::new());
+                });
+            },
+            input {
+                r#type: "text",
+                placeholder: "New tag at HEAD",
+                value: "{name_value}",
+                spellcheck: "false",
+                autocapitalize: "off",
+                autocomplete: "off",
+                oninput: move |e| new_tag_name.set(e.value()),
+            }
+            button { r#type: "submit", disabled: !can_create, "Tag" }
+        }
     }
 }
 

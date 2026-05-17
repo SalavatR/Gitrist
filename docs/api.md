@@ -805,6 +805,49 @@ branch that inverts `oid`. On conflict, `repo_state.kind` becomes
 
 Body: `{ "path": "..." }`. Same shape as rebase's resume actions.
 
+### `POST /api/repo/tags/create`
+
+```json
+{ "path": "...", "name": "v1.0", "target": "abc123", "message": "ship it" }
+```
+
+Create a tag. `target` defaults to HEAD when omitted. Without `message`
+the tag is lightweight (`git tag <name>`); with `message` it's
+annotated (`git tag -a -m <message> <name>`). Collisions return 409
+with the standard "already exists" wording.
+
+### `POST /api/repo/tags/delete`
+
+```json
+{ "path": "...", "name": "v1.0" }
+```
+
+`git tag -d <name>`. UI confirms via `window.confirm` first.
+
+### `GET /api/repo/log-file?path=&file=&limit=`
+
+Per-file history with `--follow` rename-tracking. Returns the same
+`CommitInfo[]` shape as `/api/repo/log`. Implementation shells out to
+`git log --follow --format=...` and parses the field-delimited records
+(`\x1f` between fields, `\x1e` between records — control bytes that
+can't appear in commit metadata, so no quoting is needed). `limit`
+caps at 500.
+
+### `GET /api/repo/diff/refs?path=&from=&to=`
+
+Diff between any two refs (branches, tags, oids, `HEAD~N`, anything
+`git rev-parse` resolves). Returns `Vec<FileDiff>` — same shape as
+the `files` array inside `/api/repo/diff`. Rename / copy detection
+on by default.
+
+```sh
+curl -H "Authorization: Bearer $TOKEN" \
+  "http://127.0.0.1:3737/api/repo/diff/refs?path=/repo&from=master&to=feature"
+```
+
+Unknown refs surface as a 400 with the unresolved name in the
+message.
+
 ### `POST /api/repo/stage-hunks`
 
 ```json

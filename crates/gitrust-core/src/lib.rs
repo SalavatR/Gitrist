@@ -439,8 +439,6 @@ pub fn show_blob(repo_path: &Path, oid: &str, file: &str) -> anyhow::Result<Blob
 }
 
 pub fn diff_commit(path: &Path, oid: &str) -> anyhow::Result<CommitDiff> {
-    use gix::object::tree::diff::{Action, Change};
-
     let repo = gix::open(path)?;
     let target_oid = gix::ObjectId::from_hex(oid.as_bytes())?;
     let commit_info = build_commit_info(&repo, target_oid)?;
@@ -450,14 +448,53 @@ pub fn diff_commit(path: &Path, oid: &str) -> anyhow::Result<CommitDiff> {
         Some(parent_id) => repo.find_object(parent_id)?.try_into_commit()?.tree()?,
         None => repo.empty_tree(),
     };
+    let files = diff_two_trees(&repo, &old_tree, &new_tree)?;
+    Ok(CommitDiff {
+        commit: commit_info,
+        files,
+    })
+}
+
+/// Diff between any two refs (branches, tags, oids, or anything `git`'s
+/// rev-parse understands). Returns the per-file unified diff list in
+/// the same shape `diff_commit` uses, so the UI can reuse the same
+/// renderer. Rename/copy detection is on by default.
+pub fn diff_refs(path: &Path, from: &str, to: &str) -> anyhow::Result<Vec<FileDiff>> {
+    let from = from.trim();
+    let to = to.trim();
+    if from.is_empty() || to.is_empty() {
+        anyhow::bail!("diff_refs needs non-empty `from` and `to` refs");
+    }
+    let repo = gix::open(path)?;
+    let from_id = repo
+        .rev_parse_single(from.as_bytes())
+        .map_err(|e| anyhow::anyhow!("resolving `{from}`: {e}"))?
+        .detach();
+    let to_id = repo
+        .rev_parse_single(to.as_bytes())
+        .map_err(|e| anyhow::anyhow!("resolving `{to}`: {e}"))?
+        .detach();
+    let from_tree = repo.find_object(from_id)?.try_into_commit()?.tree()?;
+    let to_tree = repo.find_object(to_id)?.try_into_commit()?.tree()?;
+    diff_two_trees(&repo, &from_tree, &to_tree)
+}
+
+/// Per-file diff between two trees. Shared by `diff_commit` (parent-vs-
+/// commit) and `diff_refs` (a-vs-b). Rename / copy detection on, tree-
+/// only entries filtered out (we report file changes).
+fn diff_two_trees(
+    repo: &gix::Repository,
+    old_tree: &gix::Tree<'_>,
+    new_tree: &gix::Tree<'_>,
+) -> anyhow::Result<Vec<FileDiff>> {
+    use gix::object::tree::diff::{Action, Change};
 
     let mut files: Vec<FileDiff> = Vec::new();
-
     let mut platform = old_tree.changes()?;
     platform.options(|opts| {
         opts.track_rewrites(Some(gix::diff::Rewrites::default()));
     });
-    platform.for_each_to_obtain_tree(&new_tree, |change| -> Result<Action, anyhow::Error> {
+    platform.for_each_to_obtain_tree(new_tree, |change| -> Result<Action, anyhow::Error> {
         let file = match &change {
             Change::Addition { id, entry_mode, .. } if !entry_mode.is_tree() => {
                 let obj = repo.find_object(id.detach())?;
@@ -517,18 +554,13 @@ pub fn diff_commit(path: &Path, oid: &str) -> anyhow::Result<CommitDiff> {
             }
             _ => None,
         };
-
         if let Some(fd) = file {
             files.push(fd);
         }
         Ok(Action::Continue(()))
     })?;
-
     files.sort_by(|a, b| a.path.cmp(&b.path));
-    Ok(CommitDiff {
-        commit: commit_info,
-        files,
-    })
+    Ok(files)
 }
 
 fn is_binary(bytes: &[u8]) -> bool {
@@ -1407,6 +1439,95 @@ pub fn resolve_file(repo: &Path, file: &str, side: &str) -> anyhow::Result<()> {
     run_git(repo, &["checkout", flag, "--", file])?;
     run_git(repo, &["add", "--", file])?;
     Ok(())
+}
+
+/// `git tag [-a -m <message>] <name> [<target>]` — create a lightweight
+/// or annotated tag. `target` defaults to HEAD when None/empty.
+/// `message: Some(_)` makes it annotated (`-a -m`); None makes it
+/// lightweight. Fails with the standard "already exists" wording when
+/// `name` is taken.
+pub fn create_tag(
+    repo: &Path,
+    name: &str,
+    target: Option<&str>,
+    message: Option<&str>,
+) -> anyhow::Result<()> {
+    let name = name.trim();
+    if name.is_empty() {
+        anyhow::bail!("tag name must not be empty");
+    }
+    let mut args: Vec<String> = vec!["tag".into()];
+    if let Some(m) = message.filter(|s| !s.trim().is_empty()) {
+        args.push("-a".into());
+        args.push("-m".into());
+        args.push(m.into());
+    }
+    args.push(name.into());
+    if let Some(t) = target.filter(|s| !s.trim().is_empty()) {
+        args.push(t.into());
+    }
+    let args_ref: Vec<&str> = args.iter().map(String::as_str).collect();
+    run_git(repo, &args_ref).map(|_| ())
+}
+
+/// `git tag -d <name>` — drop a tag. Fails when the tag doesn't exist.
+pub fn delete_tag(repo: &Path, name: &str) -> anyhow::Result<()> {
+    let name = name.trim();
+    if name.is_empty() {
+        anyhow::bail!("tag name must not be empty");
+    }
+    run_git(repo, &["tag", "-d", name]).map(|_| ())
+}
+
+/// `git log --follow -n<limit> -- <file>` — history of one file,
+/// following renames. Same wire shape as `log_commits` so the UI can
+/// reuse the log-row renderer. Implemented via shell-out: gix's
+/// rev-walk doesn't expose `--follow` rename-tracking out of the box,
+/// and parsing the CLI's record format is straightforward.
+///
+/// Record format: `%H` (full oid), `%h` (short), `%P` (parents,
+/// space-separated), `%an`/`%ae` (author), `%at` (committer time),
+/// `%s` (subject), `%b` (body). Fields separated by `\x1f`, records
+/// by `\x1e` — both control bytes that can't appear in commit
+/// metadata, so no quoting is needed.
+pub fn log_file(repo: &Path, file: &str, limit: usize) -> anyhow::Result<Vec<CommitInfo>> {
+    let limit_arg = format!("-n{}", limit.min(500));
+    let format_arg = "--format=tformat:%H%x1f%h%x1f%P%x1f%an%x1f%ae%x1f%at%x1f%s%x1f%b%x1e";
+    let out = run_git(
+        repo,
+        &["log", "--follow", &limit_arg, format_arg, "--", file],
+    )?;
+    let raw = String::from_utf8_lossy(&out.stdout);
+    let mut commits = Vec::new();
+    for record in raw.split('\x1e') {
+        let record = record.trim_start_matches('\n');
+        if record.is_empty() {
+            continue;
+        }
+        let fields: Vec<&str> = record.split('\x1f').collect();
+        if fields.len() < 7 {
+            continue;
+        }
+        let oid = fields[0].to_string();
+        let short_oid = fields[1].to_string();
+        let parents: Vec<String> = fields[2].split_whitespace().map(String::from).collect();
+        let author_name = fields[3].to_string();
+        let author_email = fields[4].to_string();
+        let time_unix: i64 = fields[5].parse().unwrap_or(0);
+        let summary = fields[6].to_string();
+        let body = fields.get(7).copied().unwrap_or("").trim_end().to_string();
+        commits.push(CommitInfo {
+            oid,
+            short_oid,
+            summary,
+            body,
+            parents,
+            author_name,
+            author_email,
+            time_unix,
+        });
+    }
+    Ok(commits)
 }
 
 /// `git fetch [remote]` — sync remote-tracking refs without touching

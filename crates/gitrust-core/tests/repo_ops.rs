@@ -1443,3 +1443,132 @@ fn scan_root_rejects_non_directory() {
     let err = gitrust_core::scan_root(&file, 5).expect_err("not a dir");
     assert!(err.to_string().contains("not a directory"));
 }
+
+#[test]
+fn create_lightweight_tag_then_delete() {
+    let r = TestRepo::new();
+    r.write("a", "x");
+    r.git(&["add", "a"]);
+    r.git(&["commit", "-q", "-m", "init"]);
+
+    gitrust_core::create_tag(r.path(), "v1.0", None, None).expect("create lightweight");
+    let tags = gitrust_core::list_tags(r.path()).expect("list");
+    let v1 = tags
+        .iter()
+        .find(|t| t.name == "v1.0")
+        .expect("v1.0 present");
+    assert!(!v1.annotated, "no -m message → lightweight tag");
+
+    gitrust_core::delete_tag(r.path(), "v1.0").expect("delete");
+    let after = gitrust_core::list_tags(r.path()).expect("list");
+    assert!(!after.iter().any(|t| t.name == "v1.0"));
+}
+
+#[test]
+fn create_annotated_tag_with_message_at_specific_commit() {
+    let r = TestRepo::new();
+    r.write("a", "1\n");
+    r.git(&["add", "a"]);
+    r.git(&["commit", "-q", "-m", "first"]);
+    let first_oid = r.git(&["rev-parse", "HEAD"]).trim().to_string();
+    r.write("a", "2\n");
+    r.git(&["add", "a"]);
+    r.git(&["commit", "-q", "-m", "second"]);
+
+    gitrust_core::create_tag(r.path(), "v0", Some(&first_oid), Some("ship it"))
+        .expect("create annotated");
+    let tags = gitrust_core::list_tags(r.path()).expect("list");
+    let v0 = tags.iter().find(|t| t.name == "v0").expect("v0 present");
+    assert!(v0.annotated, "with -m → annotated tag");
+    assert_eq!(v0.oid.as_deref(), Some(first_oid.as_str()));
+}
+
+#[test]
+fn create_tag_rejects_collision() {
+    let r = TestRepo::new();
+    r.write("a", "x");
+    r.git(&["add", "a"]);
+    r.git(&["commit", "-q", "-m", "init"]);
+    gitrust_core::create_tag(r.path(), "dup", None, None).expect("first create");
+    let err = gitrust_core::create_tag(r.path(), "dup", None, None).expect_err("collision");
+    assert!(err.to_string().contains("already exists"));
+}
+
+#[test]
+fn log_file_follows_renames() {
+    let r = TestRepo::new();
+    r.write("old-name.txt", "v1\n");
+    r.git(&["add", "old-name.txt"]);
+    r.git(&["commit", "-q", "-m", "intro"]);
+    r.git(&["mv", "old-name.txt", "new-name.txt"]);
+    r.git(&["commit", "-q", "-m", "rename"]);
+    r.write("new-name.txt", "v2\n");
+    r.git(&["add", "new-name.txt"]);
+    r.git(&["commit", "-q", "-m", "edit"]);
+
+    let hist = gitrust_core::log_file(r.path(), "new-name.txt", 20).expect("log_file");
+    let subjects: Vec<&str> = hist.iter().map(|c| c.summary.as_str()).collect();
+    assert!(subjects.contains(&"edit"));
+    assert!(subjects.contains(&"rename"));
+    // --follow means the pre-rename commit is included too.
+    assert!(
+        subjects.contains(&"intro"),
+        "log --follow should reach the pre-rename commit, got {subjects:?}"
+    );
+}
+
+#[test]
+fn log_file_respects_limit() {
+    let r = TestRepo::new();
+    for i in 1..=5 {
+        r.write("a", &format!("{i}\n"));
+        r.git(&["add", "a"]);
+        r.git(&["commit", "-q", "-m", &format!("c{i}")]);
+    }
+    let two = gitrust_core::log_file(r.path(), "a", 2).expect("log_file");
+    assert_eq!(two.len(), 2);
+    assert_eq!(two[0].summary, "c5");
+    assert_eq!(two[1].summary, "c4");
+}
+
+#[test]
+fn diff_refs_returns_changes_between_two_branches() {
+    let r = TestRepo::new();
+    r.write("a", "base\n");
+    r.git(&["add", "a"]);
+    r.git(&["commit", "-q", "-m", "base"]);
+    r.git(&["checkout", "-q", "-b", "feature"]);
+    r.write("a", "feature\n");
+    r.write("only-on-feature", "x\n");
+    r.git(&["add", "a", "only-on-feature"]);
+    r.git(&["commit", "-q", "-m", "feature edits"]);
+
+    let files = gitrust_core::diff_refs(r.path(), "master", "feature").expect("diff");
+    let by_path: std::collections::BTreeMap<_, _> = files
+        .iter()
+        .map(|f| (f.path.as_str(), f.kind.as_str()))
+        .collect();
+    assert_eq!(by_path.get("a"), Some(&"modified"));
+    assert_eq!(by_path.get("only-on-feature"), Some(&"added"));
+}
+
+#[test]
+fn diff_refs_empty_when_endpoints_match() {
+    let r = TestRepo::new();
+    r.write("a", "x\n");
+    r.git(&["add", "a"]);
+    r.git(&["commit", "-q", "-m", "init"]);
+    let files = gitrust_core::diff_refs(r.path(), "HEAD", "HEAD").expect("diff");
+    assert!(files.is_empty());
+}
+
+#[test]
+fn diff_refs_rejects_unknown_ref() {
+    let r = TestRepo::new();
+    r.write("a", "x\n");
+    r.git(&["add", "a"]);
+    r.git(&["commit", "-q", "-m", "init"]);
+    let err = gitrust_core::diff_refs(r.path(), "HEAD", "no-such-ref").expect_err("bad ref");
+    let msg = err.to_string().to_lowercase();
+    assert!(msg.contains("no-such-ref") || msg.contains("resolving"));
+}

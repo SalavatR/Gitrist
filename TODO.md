@@ -216,6 +216,32 @@ within each section.
       arrives within the debounce window. UI snapshot tests not
       yet (no Dioxus story support that I've found).
 
+## Tags, file history, arbitrary-ref diff
+
+- [x] Tag CRUD: `create_tag(name, target?, message?)` and
+      `delete_tag(name)` in core, `POST /api/repo/tags/{create,delete}`
+      on the server, and a UI grown on the Tags sidebar — bottom
+      "New tag at HEAD" form (lightweight by default) plus per-tag
+      `×` button with a `window.confirm` gate. Annotated tags via
+      the `message` field on the POST.
+- [x] Per-file history via shell-out: `log_file(repo, file, limit)`
+      runs `git log --follow --format=tformat:%H\x1f%h\x1f%P\x1f%an
+      \x1f%ae\x1f%at\x1f%s\x1f%b\x1e` and parses the
+      field-delimited records back into `CommitInfo`. `\x1f` /
+      `\x1e` are non-printable control bytes that can't appear in
+      commit metadata, so quoting is unnecessary. Exposed as
+      `GET /api/repo/log-file?path=&file=&limit=`. UI plumbing
+      (a "History" button in the blob viewer) is deferred to a
+      polish pass.
+- [x] Arbitrary-ref diff via gix: `diff_refs(repo, from, to)`
+      resolves both endpoints with `rev_parse_single` and reuses
+      a new `diff_two_trees` helper that `diff_commit` was
+      refactored on top of, so rename / copy detection and
+      token-highlighted hunks come for free. `GET /api/repo/diff/
+      refs?from=&to=`. UI surface (a sidebar "Compare refs"
+      block opening the result in the detail panel) also
+      deferred to the same polish pass.
+
 ## Multi-repo
 
 - [x] `gitrust serve --root <dir>` (and `app --root <dir>`) +

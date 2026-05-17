@@ -20,11 +20,12 @@ use gitrust_core::{
     TagInfo, TreeEntry, blame_file, checkout as core_checkout, cherry_pick as core_cherry_pick,
     cherry_pick_abort as core_cherry_pick_abort, cherry_pick_continue as core_cherry_pick_continue,
     commit as core_commit, commit_info, create_branch as core_create_branch,
-    delete_branch as core_delete_branch, diff_commit, diff_working, discard_files,
-    fetch as core_fetch, list_branches, list_remote_branches, list_staged, list_status, list_tags,
-    list_tree, log_commits, merge as core_merge, merge_abort as core_merge_abort,
-    merge_continue as core_merge_continue, pull as core_pull, push as core_push,
-    rebase as core_rebase, rebase_abort as core_rebase_abort,
+    create_tag as core_create_tag, delete_branch as core_delete_branch,
+    delete_tag as core_delete_tag, diff_commit, diff_refs as core_diff_refs, diff_working,
+    discard_files, fetch as core_fetch, list_branches, list_remote_branches, list_staged,
+    list_status, list_tags, list_tree, log_commits, log_file as core_log_file, merge as core_merge,
+    merge_abort as core_merge_abort, merge_continue as core_merge_continue, pull as core_pull,
+    push as core_push, rebase as core_rebase, rebase_abort as core_rebase_abort,
     rebase_continue as core_rebase_continue, rebase_skip as core_rebase_skip,
     rename_branch as core_rename_branch, repo_state as core_repo_state, reset as core_reset,
     resolve_file as core_resolve_file, revert as core_revert, revert_abort as core_revert_abort,
@@ -176,6 +177,78 @@ struct BlameQuery {
 async fn repo_blame(Query(q): Query<BlameQuery>) -> Result<Json<BlameView>, ApiError> {
     let path = PathBuf::from(q.path);
     blame_file(&path, &q.file).map(Json).map_err(ApiError::from)
+}
+
+#[derive(Deserialize)]
+struct LogFileQuery {
+    path: String,
+    file: String,
+    #[serde(default = "default_limit")]
+    limit: usize,
+}
+
+async fn repo_log_file(Query(q): Query<LogFileQuery>) -> Result<Json<Vec<CommitInfo>>, ApiError> {
+    let path = PathBuf::from(q.path);
+    core_log_file(&path, &q.file, q.limit.min(500))
+        .map(Json)
+        .map_err(ApiError::from)
+}
+
+#[derive(Deserialize)]
+struct DiffRefsQuery {
+    path: String,
+    from: String,
+    to: String,
+}
+
+async fn repo_diff_refs(Query(q): Query<DiffRefsQuery>) -> Result<Json<Vec<FileDiff>>, ApiError> {
+    let path = PathBuf::from(q.path);
+    core_diff_refs(&path, &q.from, &q.to)
+        .map(Json)
+        .map_err(ApiError::from)
+}
+
+#[derive(Deserialize)]
+struct TagCreateBody {
+    path: String,
+    name: String,
+    #[serde(default)]
+    target: Option<String>,
+    #[serde(default)]
+    message: Option<String>,
+}
+
+async fn repo_tag_create(Json(body): Json<TagCreateBody>) -> Result<StatusCode, ApiError> {
+    let TagCreateBody {
+        path,
+        name,
+        target,
+        message,
+    } = body;
+    let repo = PathBuf::from(path);
+    tokio::task::spawn_blocking(move || {
+        core_create_tag(&repo, &name, target.as_deref(), message.as_deref())
+    })
+    .await
+    .map_err(|e| anyhow::anyhow!("join error: {e}"))?
+    .map_err(ApiError::from)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Deserialize)]
+struct TagDeleteBody {
+    path: String,
+    name: String,
+}
+
+async fn repo_tag_delete(Json(body): Json<TagDeleteBody>) -> Result<StatusCode, ApiError> {
+    let TagDeleteBody { path, name } = body;
+    let repo = PathBuf::from(path);
+    tokio::task::spawn_blocking(move || core_delete_tag(&repo, &name))
+        .await
+        .map_err(|e| anyhow::anyhow!("join error: {e}"))?
+        .map_err(ApiError::from)?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 #[derive(Deserialize)]
@@ -1163,7 +1236,11 @@ pub fn router(source: WebSource, auth: AuthState) -> Router {
         .route("/repo/revert/abort", post(repo_revert_abort))
         .route("/repo/revert/continue", post(repo_revert_continue))
         .route("/repo/revert/skip", post(repo_revert_skip))
-        .route("/repo/reset", post(repo_reset));
+        .route("/repo/reset", post(repo_reset))
+        .route("/repo/log-file", get(repo_log_file))
+        .route("/repo/diff/refs", get(repo_diff_refs))
+        .route("/repo/tags/create", post(repo_tag_create))
+        .route("/repo/tags/delete", post(repo_tag_delete));
 
     #[cfg(feature = "desktop")]
     let protected = protected.route("/repo/pick-folder", post(pick_folder));

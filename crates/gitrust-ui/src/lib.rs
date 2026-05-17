@@ -104,6 +104,7 @@ fn AppContent() -> Element {
     let commit_err = use_signal(|| None::<String>);
     let commit_author = use_signal(String::new);
     let new_branch = use_signal(String::new);
+    let new_tag = use_signal(String::new);
     let mut log_query = use_signal(String::new);
     let mut log_all = use_signal(initial_log_all);
     let blob_query = use_signal(String::new);
@@ -736,7 +737,7 @@ fn AppContent() -> Element {
                             span { "Tags" }
                             {render_tag_count(&tags.read_unchecked())}
                         }
-                        {render_tags(&tags.read_unchecked(), tags)}
+                        {render_tags(&tags.read_unchecked(), tags, tags, current_repo, new_tag)}
                     }
                     section { class: "side-block",
                         div { class: "side-title",
