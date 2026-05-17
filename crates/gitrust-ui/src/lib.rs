@@ -107,6 +107,7 @@ fn AppContent() -> Element {
     let new_tag = use_signal(String::new);
     let mut log_query = use_signal(String::new);
     let mut log_all = use_signal(initial_log_all);
+    let mut file_history = use_signal(|| None::<String>);
     let blob_query = use_signal(String::new);
     let mut net_busy = use_signal(|| false);
     let mut net_result = use_signal(|| None::<Result<NetworkOpResult, String>>);
@@ -145,7 +146,24 @@ fn AppContent() -> Element {
         let path = current_repo.read().clone();
         let q = log_query.read().clone();
         let all = *log_all.read();
-        async move { fetch_log(&path, LOG_LIMIT, &q, all).await }
+        let file = file_history.read().clone();
+        async move {
+            // When the user is browsing a specific file's history we
+            // dispatch to the `--follow` endpoint instead of the full
+            // log. The other knobs (--all, substring filter) don't
+            // apply in that mode — the API doesn't accept them and
+            // the UI hides them via the same `file.is_none()` check.
+            match file {
+                Some(f) => fetch::fetch_log_file(&path, &f, LOG_LIMIT).await,
+                None => fetch_log(&path, LOG_LIMIT, &q, all).await,
+            }
+        }
+    });
+    // Switching repos clears the file-history filter — the path will
+    // not exist in the new workspace and the next log fetch would 404.
+    use_effect(move || {
+        let _ = current_repo.read();
+        file_history.set(None);
     });
     let mut status = use_resource(move || {
         let path = current_repo.read().clone();
@@ -807,29 +825,74 @@ fn AppContent() -> Element {
                     section { class: "main-block scroll-log",
                         div { class: "block-toolbar",
                             h2 { style: "margin: 0;", "History" }
-                            label { class: "all-branches-toggle",
-                                title: "Walk every ref tip — local + remote-tracking branches — instead of just HEAD's ancestors.",
-                                input {
-                                    r#type: "checkbox",
-                                    checked: *log_all.read(),
-                                    oninput: move |e| log_all.set(e.value() == "true"),
+                            {
+                                // File-history chip takes the place of
+                                // the All-branches checkbox + search
+                                // when set — the log endpoint that
+                                // drives this view doesn't honor either.
+                                let file = file_history.read().clone();
+                                match file {
+                                    Some(path) => {
+                                        let display: String = if path.len() > 40 {
+                                            let tail: String = path
+                                                .chars()
+                                                .rev()
+                                                .take(37)
+                                                .collect::<Vec<_>>()
+                                                .into_iter()
+                                                .rev()
+                                                .collect();
+                                            format!("…{tail}")
+                                        } else {
+                                            path.clone()
+                                        };
+                                        rsx! {
+                                            span { class: "file-history-chip",
+                                                title: "{path}",
+                                                span { class: "chip-prefix", "History of" }
+                                                code { "{display}" }
+                                                button {
+                                                    class: "chip-clear",
+                                                    title: "Clear file filter",
+                                                    onclick: move |_| file_history.set(None),
+                                                    "×"
+                                                }
+                                            }
+                                        }
+                                    }
+                                    None => rsx! {
+                                        label { class: "all-branches-toggle",
+                                            title: "Walk every ref tip — local + remote-tracking branches — instead of just HEAD's ancestors.",
+                                            input {
+                                                r#type: "checkbox",
+                                                checked: *log_all.read(),
+                                                oninput: move |e| log_all.set(e.value() == "true"),
+                                            }
+                                            span { "All branches" }
+                                        }
+                                        input {
+                                            class: "history-search",
+                                            r#type: "search",
+                                            placeholder: "Filter by subject / author / oid prefix",
+                                            value: "{log_query}",
+                                            spellcheck: "false",
+                                            autocapitalize: "off",
+                                            autocomplete: "off",
+                                            oninput: move |e| log_query.set(e.value()),
+                                        }
+                                    }
                                 }
-                                span { "All branches" }
-                            }
-                            input {
-                                class: "history-search",
-                                r#type: "search",
-                                placeholder: "Filter by subject / author / oid prefix",
-                                value: "{log_query}",
-                                spellcheck: "false",
-                                autocapitalize: "off",
-                                autocomplete: "off",
-                                oninput: move |e| log_query.set(e.value()),
                             }
                         }
                         div { class: "log-scroll",
                             {
-                                let show_graph = log_query.read().trim().is_empty();
+                                // Graph is meaningful only over a
+                                // contiguous ancestry walk — a search-
+                                // filtered or file-history result is
+                                // sparse and the lane assignment would
+                                // mislead.
+                                let show_graph = log_query.read().trim().is_empty()
+                                    && file_history.read().is_none();
                                 render_log(
                                     &log.read_unchecked(),
                                     log,
@@ -1023,6 +1086,7 @@ fn AppContent() -> Element {
                             hunk_picker,
                             net_busy,
                             net_result,
+                            file_history,
                         )}
                     }
                 }

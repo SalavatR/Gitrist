@@ -22,13 +22,10 @@ pub(crate) async fn fetch_repos() -> Result<Vec<RepoEntry>, String> {
     fetch_json("/api/repos").await
 }
 
-// `fetch_log_file` and `fetch_diff_refs` wrap the new endpoints. The
-// in-tree UI doesn't surface them yet — file-history / ref-diff views
-// are queued as the next UI pass — but the wrappers exist so callers
-// (and any out-of-tree consumers, e.g. curl-style scripting in the
-// browser console) have parity with the API surface.
+// `fetch_log_file` powers the file-history view; `fetch_diff_refs`
+// still has no UI surface yet (queued as the next polish pass) so it
+// keeps its dead-code allow.
 #[cfg(target_arch = "wasm32")]
-#[allow(dead_code)]
 pub(crate) async fn fetch_log_file(
     path: &str,
     file: &str,
@@ -43,7 +40,7 @@ pub(crate) async fn fetch_log_file(
 }
 
 #[cfg(target_arch = "wasm32")]
-#[allow(dead_code)]
+#[allow(dead_code)] // ref-diff UI is the next polish step.
 pub(crate) async fn fetch_diff_refs(
     path: &str,
     from: &str,
@@ -599,10 +596,28 @@ pub(crate) async fn fetch_repos() -> Result<Vec<RepoEntry>, String> {
     Err("native build: fetching not implemented".into())
 }
 
-// No native stubs for `fetch_log_file` / `fetch_diff_refs` — they are
-// only called from the wasm-only UI surface (queued for the next pass)
-// and adding `pub(crate)` stubs here just creates unused-fn warnings
-// the native `cargo check` doesn't have a good place to silence.
+// `fetch_log_file` IS called from lib.rs (the file-history view) on
+// every target, so it needs a native stub. `fetch_diff_refs` is still
+// unused on native — wrap its stub in `#[allow(dead_code)]` to silence
+// the lint until the ref-diff UI is wired.
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) async fn fetch_log_file(
+    _path: &str,
+    _file: &str,
+    _limit: usize,
+) -> Result<Vec<CommitInfo>, String> {
+    Err("native build: fetching not implemented".into())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(dead_code)]
+pub(crate) async fn fetch_diff_refs(
+    _path: &str,
+    _from: &str,
+    _to: &str,
+) -> Result<Vec<FileDiff>, String> {
+    Err("native build: fetching not implemented".into())
+}
 
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) async fn post_tag_create(

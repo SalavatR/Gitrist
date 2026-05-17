@@ -246,9 +246,10 @@ pub(crate) fn render_detail(
     hunk_picker: Signal<HashSet<usize>>,
     net_busy: Signal<bool>,
     net_result: Signal<Option<Result<gitrust_types::NetworkOpResult, String>>>,
+    file_history: Signal<Option<String>>,
 ) -> Element {
     if selected_blob.read().is_some() {
-        return render_blob_viewer(blob_state, blob_res, blame_state, blob_query);
+        return render_blob_viewer(blob_state, blob_res, blame_state, blob_query, file_history);
     }
     if let Some(file) = selected_file.read().clone() {
         return render_working_detail(
@@ -274,6 +275,7 @@ fn render_blob_viewer(
     mut res: Resource<Result<Option<BlobView>, String>>,
     blame_state: &Option<Result<Option<BlameView>, String>>,
     mut blob_query: Signal<String>,
+    mut file_history: Signal<Option<String>>,
 ) -> Element {
     match state {
         Some(Ok(Some(b))) => {
@@ -283,6 +285,7 @@ fn render_blob_viewer(
             let is_binary = b.is_binary;
             let line_count = b.lines.len();
             let lines = b.lines.clone();
+            let history_target = path.clone();
 
             // Key blame entries by line_number so we can attach an
             // annotation to each blob line without a per-row scan.
@@ -311,7 +314,17 @@ fn render_blob_viewer(
 
             rsx! {
                 div { class: "diff-header",
-                    div { class: "title", code { class: "full-oid", "{path}" } }
+                    div { class: "title",
+                        code { class: "full-oid", "{path}" }
+                        button {
+                            class: "blob-history-btn",
+                            title: "Show this file's commit history (git log --follow)",
+                            onclick: move |_| {
+                                file_history.set(Some(history_target.clone()));
+                            },
+                            "History"
+                        }
+                    }
                     div { class: "meta",
                         "{line_count} lines · {size} bytes · "
                         code { "{oid}" }
