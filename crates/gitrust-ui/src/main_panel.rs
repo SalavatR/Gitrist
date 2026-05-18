@@ -252,7 +252,32 @@ pub(crate) fn render_detail(
     conflict_state: &Option<Result<Option<ConflictView>, String>>,
     conflict_res: Resource<Result<Option<ConflictView>, String>>,
     state_res: Resource<Result<gitrust_types::RepoState, String>>,
+    refs_diff_state: &Option<Result<Option<Vec<FileDiff>>, String>>,
+    refs_diff_res: Resource<Result<Option<Vec<FileDiff>>, String>>,
+    compare_refs: Signal<Option<(String, String)>>,
+    staged_diff_state: &Option<Result<Option<FileDiff>, String>>,
+    staged_diff_res: Resource<Result<Option<FileDiff>, String>>,
+    unstage_target: Signal<Option<String>>,
+    unstage_picker: Signal<HashSet<usize>>,
 ) -> Element {
+    // Most-specific intent wins. The Unstage view fires from a precise
+    // sidebar click and the user expects the panel to switch right then.
+    if let Some(file) = unstage_target.read().clone() {
+        return render_unstage_detail(
+            staged_diff_state,
+            staged_diff_res,
+            &file,
+            side_by_side,
+            current_repo,
+            unstage_target,
+            unstage_picker,
+            net_busy,
+            net_result,
+        );
+    }
+    if compare_refs.read().is_some() {
+        return render_refs_diff(refs_diff_state, refs_diff_res, compare_refs, side_by_side);
+    }
     if selected_blob.read().is_some() {
         return render_blob_viewer(blob_state, blob_res, blame_state, blob_query, file_history);
     }
@@ -293,6 +318,151 @@ pub(crate) fn render_detail(
         return render_commit_detail(commit_state, commit_res, side_by_side);
     }
     rsx! { p { class: "muted", "Select a commit, status entry, or file to inspect." } }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn render_unstage_detail(
+    state: &Option<Result<Option<FileDiff>, String>>,
+    mut res: Resource<Result<Option<FileDiff>, String>>,
+    file: &str,
+    side_by_side: bool,
+    current_repo: Signal<String>,
+    mut unstage_target: Signal<Option<String>>,
+    mut unstage_picker: Signal<HashSet<usize>>,
+    mut net_busy: Signal<bool>,
+    mut net_result: Signal<Option<Result<gitrust_types::NetworkOpResult, String>>>,
+) -> Element {
+    match state {
+        Some(Ok(Some(f))) => {
+            let path = file.to_string();
+            let path_for_action = path.clone();
+            let kind = f.kind.clone();
+            let f_clone = f.clone();
+            let stageable = kind == "modified" && !f.is_binary;
+            let picked = unstage_picker.read().clone();
+            let n_picked = picked.len();
+            let busy = *net_busy.read();
+            rsx! {
+                div { class: "diff-header",
+                    div { class: "title",
+                        span { class: "kind kind-{kind}", "{kind}" }
+                        " "
+                        code { class: "full-oid", "{path}" }
+                        button {
+                            class: "blob-history-btn",
+                            title: "Close the unstage view",
+                            onclick: move |_| unstage_target.set(None),
+                            "Close"
+                        }
+                    }
+                    div { class: "meta", "Index vs HEAD (staged)" }
+                    if stageable {
+                        div { class: "hunk-stage-bar",
+                            span { class: "muted small",
+                                if n_picked == 0 {
+                                    "Tick hunks to unstage them piecemeal."
+                                } else if n_picked == 1 {
+                                    "1 hunk selected"
+                                } else {
+                                    "{n_picked} hunks selected"
+                                }
+                            }
+                            button {
+                                class: "stage-hunks-btn",
+                                disabled: busy || n_picked == 0,
+                                onclick: move |_| {
+                                    let repo = current_repo.read().clone();
+                                    let file = path_for_action.clone();
+                                    let hunks: Vec<usize> = unstage_picker
+                                        .read()
+                                        .iter()
+                                        .copied()
+                                        .collect();
+                                    net_busy.set(true);
+                                    net_result.set(None);
+                                    let mut res = res;
+                                    spawn(async move {
+                                        let r = crate::fetch::post_unstage_hunks(
+                                            &repo, &file, &hunks,
+                                        ).await;
+                                        net_busy.set(false);
+                                        if let Err(e) = r {
+                                            net_result.set(Some(Err(e)));
+                                        } else {
+                                            unstage_picker.set(HashSet::new());
+                                        }
+                                        res.restart();
+                                    });
+                                },
+                                if n_picked == 0 { "Unstage hunks" } else { "Unstage {n_picked} hunk(s)" }
+                            }
+                        }
+                    }
+                }
+                {render_file_diff(f_clone, side_by_side, if stageable { Some(unstage_picker) } else { None })}
+            }
+        }
+        Some(Ok(None)) | None => rsx! { p { class: "muted", "Loading…" } },
+        Some(Err(e)) => {
+            let msg = e.clone();
+            rsx! {
+                p { class: "err",
+                    "Error: {msg} "
+                    button { class: "retry-btn", onclick: move |_| res.restart(), "Retry" }
+                }
+            }
+        }
+    }
+}
+
+fn render_refs_diff(
+    state: &Option<Result<Option<Vec<FileDiff>>, String>>,
+    mut res: Resource<Result<Option<Vec<FileDiff>>, String>>,
+    compare_refs: Signal<Option<(String, String)>>,
+    side_by_side: bool,
+) -> Element {
+    let (from_label, to_label) = compare_refs
+        .read()
+        .as_ref()
+        .map(|(f, t)| (f.clone(), t.clone()))
+        .unwrap_or_default();
+    match state {
+        Some(Ok(Some(files))) => {
+            let n = files.len();
+            let rows = files.clone();
+            rsx! {
+                div { class: "diff-header",
+                    div { class: "title",
+                        span { class: "kind kind-modified", "compare" }
+                        " "
+                        code { class: "full-oid", "{from_label} → {to_label}" }
+                    }
+                    div { class: "meta",
+                        if n == 0 {
+                            "Identical — no file changes between these refs."
+                        } else if n == 1 {
+                            "1 file changed"
+                        } else {
+                            "{n} files changed"
+                        }
+                    }
+                }
+                for f in rows {
+                    {render_file_diff(f, side_by_side, None)}
+                }
+            }
+        }
+        Some(Ok(None)) | None => rsx! { p { class: "muted", "Loading…" } },
+        Some(Err(e)) => {
+            let msg = e.clone();
+            rsx! {
+                p { class: "err",
+                    "Error: {msg} "
+                    button { class: "retry-btn", onclick: move |_| res.restart(), "Retry" }
+                }
+            }
+        }
+    }
 }
 
 #[allow(clippy::too_many_arguments)]

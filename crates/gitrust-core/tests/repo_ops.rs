@@ -1730,3 +1730,85 @@ fn parse_returns_empty_for_clean_file() {
     let view = gitrust_core::parse_conflicts(r.path(), "clean.txt").expect("parse");
     assert!(view.blocks.is_empty());
 }
+
+#[test]
+fn diff_index_reports_staged_modifications() {
+    let r = TestRepo::new();
+    let baseline: String = (1..=10).map(|i| format!("line {i}\n")).collect();
+    r.write("a", &baseline);
+    r.git(&["add", "a"]);
+    r.git(&["commit", "-q", "-m", "init"]);
+    // Modify and stage; worktree-vs-index would be empty now.
+    let mut edited: Vec<String> = (1..=10).map(|i| format!("line {i}\n")).collect();
+    edited[2] = "line 3 EDITED\n".to_string();
+    r.write("a", &edited.concat());
+    r.git(&["add", "a"]);
+
+    let diff = gitrust_core::diff_index(r.path(), "a").expect("diff_index");
+    assert_eq!(diff.path, "a");
+    assert_eq!(diff.kind, "modified");
+    assert!(!diff.hunks.is_empty());
+    let kinds: Vec<&str> = diff
+        .hunks
+        .iter()
+        .flat_map(|h| h.lines.iter().map(|l| l.kind.as_str()))
+        .collect();
+    assert!(kinds.contains(&"add"));
+    assert!(kinds.contains(&"del"));
+}
+
+#[test]
+fn unstage_hunks_reverts_only_selected_hunks() {
+    let r = TestRepo::new();
+    let baseline: String = (1..=20).map(|i| format!("line {i}\n")).collect();
+    r.write("a", &baseline);
+    r.git(&["add", "a"]);
+    r.git(&["commit", "-q", "-m", "init"]);
+    // Two staged edits.
+    let mut edited: Vec<String> = (1..=20).map(|i| format!("line {i}\n")).collect();
+    edited[2] = "line 3 EDITED\n".to_string();
+    edited[16] = "line 17 EDITED\n".to_string();
+    r.write("a", &edited.concat());
+    r.git(&["add", "a"]);
+
+    let diff = gitrust_core::diff_index(r.path(), "a").expect("diff_index");
+    assert_eq!(diff.hunks.len(), 2);
+
+    // Unstage only the second hunk; the first stays staged.
+    gitrust_core::unstage_hunks(r.path(), "a", &[1]).expect("unstage hunk 1");
+
+    let cached = r.git(&["diff", "--cached", "a"]);
+    assert!(cached.contains("line 3 EDITED"), "hunk 0 still staged");
+    assert!(
+        !cached.contains("line 17 EDITED"),
+        "hunk 1 removed from index"
+    );
+    // Working tree still carries both — unstage only flips the index.
+    let on_disk = std::fs::read_to_string(r.path().join("a")).unwrap();
+    assert!(on_disk.contains("line 3 EDITED"));
+    assert!(on_disk.contains("line 17 EDITED"));
+}
+
+#[test]
+fn unstage_hunks_rejects_out_of_range() {
+    let r = TestRepo::new();
+    r.write("a", "v1\n");
+    r.git(&["add", "a"]);
+    r.git(&["commit", "-q", "-m", "init"]);
+    r.write("a", "v2\n");
+    r.git(&["add", "a"]);
+    let err = gitrust_core::unstage_hunks(r.path(), "a", &[99]).expect_err("oor");
+    assert!(err.to_string().contains("out of range"));
+}
+
+#[test]
+fn unstage_hunks_rejects_empty_selection() {
+    let r = TestRepo::new();
+    r.write("a", "x\n");
+    r.git(&["add", "a"]);
+    r.git(&["commit", "-q", "-m", "init"]);
+    r.write("a", "y\n");
+    r.git(&["add", "a"]);
+    let err = gitrust_core::unstage_hunks(r.path(), "a", &[]).expect_err("empty");
+    assert!(err.to_string().contains("no hunks"));
+}

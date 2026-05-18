@@ -522,6 +522,7 @@ pub(crate) fn render_staged(
     state: &Option<Result<Vec<StatusEntry>, String>>,
     mut res: Resource<Result<Vec<StatusEntry>, String>>,
     current_repo: Signal<String>,
+    mut unstage_target: Signal<Option<String>>,
 ) -> Element {
     match state {
         Some(Ok(entries)) if entries.is_empty() => {
@@ -534,12 +535,25 @@ pub(crate) fn render_staged(
                     for e in rows {
                         {
                             let p = e.path.clone();
+                            let p_hunks = e.path.clone();
+                            let modified = e.kind == "modified";
                             rsx! {
                                 li { key: "{e.path}",
                                     span { class: "badge badge-{e.kind}", title: "{e.kind}",
                                         {status_glyph(&e.kind)}
                                     }
                                     {render_status_path(&e)}
+                                    if modified {
+                                        button {
+                                            class: "stage-btn hunks",
+                                            title: "Unstage individual hunks of this file",
+                                            onclick: move |evt| {
+                                                evt.stop_propagation();
+                                                unstage_target.set(Some(p_hunks.clone()));
+                                            },
+                                            "⌥"
+                                        }
+                                    }
                                     button {
                                         class: "stage-btn unstage",
                                         title: "Unstage this file",

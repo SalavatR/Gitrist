@@ -22,11 +22,12 @@ use gitrust_core::{
     cherry_pick_continue as core_cherry_pick_continue, commit as core_commit, commit_info,
     create_branch as core_create_branch, create_tag as core_create_tag,
     delete_branch as core_delete_branch, delete_tag as core_delete_tag, diff_commit,
-    diff_refs as core_diff_refs, diff_working, discard_files, fetch as core_fetch, list_branches,
-    list_remote_branches, list_staged, list_status, list_tags, list_tree, log_commits,
-    log_file as core_log_file, merge as core_merge, merge_abort as core_merge_abort,
-    merge_continue as core_merge_continue, parse_conflicts as core_parse_conflicts,
-    pull as core_pull, push as core_push, rebase as core_rebase, rebase_abort as core_rebase_abort,
+    diff_index as core_diff_index, diff_refs as core_diff_refs, diff_working, discard_files,
+    fetch as core_fetch, list_branches, list_remote_branches, list_staged, list_status, list_tags,
+    list_tree, log_commits, log_file as core_log_file, merge as core_merge,
+    merge_abort as core_merge_abort, merge_continue as core_merge_continue,
+    parse_conflicts as core_parse_conflicts, pull as core_pull, push as core_push,
+    rebase as core_rebase, rebase_abort as core_rebase_abort,
     rebase_continue as core_rebase_continue, rebase_skip as core_rebase_skip,
     rename_branch as core_rename_branch, repo_state as core_repo_state, reset as core_reset,
     resolve_conflict_hunk as core_resolve_conflict_hunk, resolve_file as core_resolve_file,
@@ -35,6 +36,7 @@ use gitrust_core::{
     stage_files as core_stage_files, stage_hunks as core_stage_hunks,
     stash_drop as core_stash_drop, stash_list as core_stash_list, stash_pop as core_stash_pop,
     stash_save as core_stash_save, summarize_repo, unstage_files as core_unstage,
+    unstage_hunks as core_unstage_hunks,
 };
 
 #[derive(Serialize)]
@@ -168,6 +170,23 @@ async fn repo_diff_working(Query(q): Query<DiffWorkingQuery>) -> Result<Json<Fil
     diff_working(&path, &q.file)
         .map(Json)
         .map_err(ApiError::from)
+}
+
+async fn repo_diff_index(Query(q): Query<DiffWorkingQuery>) -> Result<Json<FileDiff>, ApiError> {
+    let path = PathBuf::from(q.path);
+    core_diff_index(&path, &q.file)
+        .map(Json)
+        .map_err(ApiError::from)
+}
+
+async fn repo_unstage_hunks(Json(body): Json<StageHunksBody>) -> Result<StatusCode, ApiError> {
+    let StageHunksBody { path, file, hunks } = body;
+    let repo = PathBuf::from(path);
+    tokio::task::spawn_blocking(move || core_unstage_hunks(&repo, &file, &hunks))
+        .await
+        .map_err(|e| anyhow::anyhow!("join error: {e}"))?
+        .map_err(ApiError::from)?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 #[derive(Deserialize)]
@@ -1261,6 +1280,8 @@ pub fn router(source: WebSource, auth: AuthState) -> Router {
         )
         .route("/repo/resolve", post(repo_resolve))
         .route("/repo/stage-hunks", post(repo_stage_hunks))
+        .route("/repo/diff/index", get(repo_diff_index))
+        .route("/repo/unstage-hunks", post(repo_unstage_hunks))
         .route("/repo/conflict", get(repo_conflict))
         .route("/repo/resolve-hunk", post(repo_resolve_hunk))
         .route("/repo/rebase", post(repo_rebase))

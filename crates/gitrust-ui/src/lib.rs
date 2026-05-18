@@ -113,6 +113,18 @@ fn AppContent() -> Element {
     let mut net_result = use_signal(|| None::<Result<NetworkOpResult, String>>);
     let mut reset_mode = use_signal(|| "mixed".to_string());
     let mut hunk_picker = use_signal(std::collections::HashSet::<usize>::new);
+    // Unstage-by-hunks lives in its own slot — set via the "⌥" button
+    // on the Staged sidebar row, cleared when the user switches repos
+    // or selects something else.
+    let unstage_target = use_signal(|| None::<String>);
+    let mut unstage_picker = use_signal(std::collections::HashSet::<usize>::new);
+    // Compare-refs: two text inputs in the sidebar feed these signals.
+    // When `compare_refs` is `Some((from, to))`, the `refs_diff` resource
+    // fetches and the detail panel renders the file list instead of
+    // any other selection.
+    let mut compare_from = use_signal(|| "master".to_string());
+    let mut compare_to = use_signal(String::new);
+    let mut compare_refs = use_signal(|| None::<(String, String)>);
 
     use_effect(move || persist_log_all(*log_all.read()));
     // Clear the hunk selection whenever the user switches to a different
@@ -208,6 +220,31 @@ fn AppContent() -> Element {
             match file {
                 Some(f) => fetch::fetch_conflict(&path, &f).await.map(Some),
                 None => Ok::<Option<gitrust_types::ConflictView>, String>(None),
+            }
+        }
+    });
+    let staged_diff = use_resource(move || {
+        let path = current_repo.read().clone();
+        let file = unstage_target.read().clone();
+        async move {
+            match file {
+                Some(f) => fetch::fetch_diff_index(&path, &f).await.map(Some),
+                None => Ok::<Option<FileDiff>, String>(None),
+            }
+        }
+    });
+    use_effect(move || {
+        let _ = unstage_target.read();
+        unstage_picker.set(std::collections::HashSet::new());
+    });
+
+    let refs_diff = use_resource(move || {
+        let path = current_repo.read().clone();
+        let pair = compare_refs.read().clone();
+        async move {
+            match pair {
+                Some((from, to)) => fetch::fetch_diff_refs(&path, &from, &to).await.map(Some),
+                None => Ok::<Option<Vec<FileDiff>>, String>(None),
             }
         }
     });
@@ -804,6 +841,7 @@ fn AppContent() -> Element {
                             &staged.read_unchecked(),
                             staged,
                             current_repo,
+                            unstage_target,
                         )}
                     }
                     section { class: "side-block",
@@ -819,6 +857,64 @@ fn AppContent() -> Element {
                             selected_blob,
                             current_repo,
                         )}
+                    }
+                    section { class: "side-block",
+                        div { class: "side-title", span { "Compare refs" } }
+                        {
+                            let from_val = compare_from.read().clone();
+                            let to_val = compare_to.read().clone();
+                            let active = compare_refs.read().is_some();
+                            let can_run =
+                                !from_val.trim().is_empty() && !to_val.trim().is_empty();
+                            rsx! {
+                                form {
+                                    class: "compare-refs-form",
+                                    onsubmit: move |e| {
+                                        e.prevent_default();
+                                        let from = compare_from.read().trim().to_string();
+                                        let to = compare_to.read().trim().to_string();
+                                        if from.is_empty() || to.is_empty() {
+                                            return;
+                                        }
+                                        compare_refs.set(Some((from, to)));
+                                    },
+                                    input {
+                                        r#type: "text",
+                                        placeholder: "from (ref / oid)",
+                                        value: "{from_val}",
+                                        spellcheck: "false",
+                                        autocapitalize: "off",
+                                        autocomplete: "off",
+                                        oninput: move |e| compare_from.set(e.value()),
+                                    }
+                                    input {
+                                        r#type: "text",
+                                        placeholder: "to (ref / oid)",
+                                        value: "{to_val}",
+                                        spellcheck: "false",
+                                        autocapitalize: "off",
+                                        autocomplete: "off",
+                                        oninput: move |e| compare_to.set(e.value()),
+                                    }
+                                    div { class: "compare-refs-actions",
+                                        button {
+                                            r#type: "submit",
+                                            disabled: !can_run,
+                                            "Compare"
+                                        }
+                                        if active {
+                                            button {
+                                                r#type: "button",
+                                                class: "muted small",
+                                                title: "Close the comparison panel",
+                                                onclick: move |_| compare_refs.set(None),
+                                                "Clear"
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                     section { class: "side-block",
                         div { class: "side-title",
@@ -1121,6 +1217,13 @@ fn AppContent() -> Element {
                             &conflict_view.read_unchecked(),
                             conflict_view,
                             state,
+                            &refs_diff.read_unchecked(),
+                            refs_diff,
+                            compare_refs,
+                            &staged_diff.read_unchecked(),
+                            staged_diff,
+                            unstage_target,
+                            unstage_picker,
                         )}
                     }
                 }

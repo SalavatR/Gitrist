@@ -40,7 +40,6 @@ pub(crate) async fn fetch_log_file(
 }
 
 #[cfg(target_arch = "wasm32")]
-#[allow(dead_code)] // ref-diff UI is the next polish step.
 pub(crate) async fn fetch_diff_refs(
     path: &str,
     from: &str,
@@ -422,6 +421,29 @@ pub(crate) async fn post_stage_hunks(
 }
 
 #[cfg(target_arch = "wasm32")]
+pub(crate) async fn fetch_diff_index(path: &str, file: &str) -> Result<FileDiff, String> {
+    fetch_json(&format!(
+        "/api/repo/diff/index?path={}&file={}",
+        q(path),
+        q(file),
+    ))
+    .await
+}
+
+#[cfg(target_arch = "wasm32")]
+pub(crate) async fn post_unstage_hunks(
+    path: &str,
+    file: &str,
+    hunks: &[usize],
+) -> Result<(), String> {
+    post_empty(
+        "/api/repo/unstage-hunks",
+        serde_json::json!({ "path": path, "file": file, "hunks": hunks }),
+    )
+    .await
+}
+
+#[cfg(target_arch = "wasm32")]
 pub(crate) async fn post_rebase(path: &str, upstream: &str) -> Result<NetworkOpResult, String> {
     post_with_response(
         "/api/repo/rebase",
@@ -659,7 +681,6 @@ pub(crate) async fn fetch_log_file(
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-#[allow(dead_code)]
 pub(crate) async fn fetch_diff_refs(
     _path: &str,
     _from: &str,
@@ -914,6 +935,20 @@ pub(crate) async fn post_resolve_hunk(
 
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) async fn post_stage_hunks(
+    _path: &str,
+    _file: &str,
+    _hunks: &[usize],
+) -> Result<(), String> {
+    Err("native build: writes not implemented".into())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) async fn fetch_diff_index(_path: &str, _file: &str) -> Result<FileDiff, String> {
+    Err("native build: fetching not implemented".into())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) async fn post_unstage_hunks(
     _path: &str,
     _file: &str,
     _hunks: &[usize],

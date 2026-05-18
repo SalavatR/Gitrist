@@ -704,6 +704,53 @@ details.tree-folder summary.tree-folder-row::-webkit-details-marker { display: n
   font-size: 0.8rem;
   cursor: pointer;
 }
+.compare-refs-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+.compare-refs-form input {
+  padding: 0.35rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  color: var(--text);
+  font-size: 0.82rem;
+}
+.compare-refs-form input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.compare-refs-actions {
+  display: flex;
+  gap: 0.3rem;
+  align-items: center;
+}
+.compare-refs-form button[type="submit"] {
+  flex: 1;
+  padding: 0.35rem 0.7rem;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  background: var(--accent-bg);
+  color: var(--accent);
+  cursor: pointer;
+  font-size: 0.8rem;
+  font-weight: 500;
+}
+.compare-refs-form button[type="submit"]:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.compare-refs-form button[type="button"] {
+  padding: 0.35rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  color: var(--text-2);
+  cursor: pointer;
+  font-size: 0.78rem;
+}
+
 .conflict-blocks {
   display: flex;
   flex-direction: column;
@@ -1448,6 +1495,11 @@ details.file-diff[open] .disclosure::before { content: "▾"; }
   background: var(--modified-bg);
   border-color: var(--modified);
   color: var(--modified);
+}
+.stage-btn.hunks:hover {
+  background: var(--accent-bg);
+  border-color: var(--accent);
+  color: var(--accent);
 }
 
 /* Per-branch row actions (switch / delete), revealed on hover of the row. */

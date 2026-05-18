@@ -1307,6 +1307,145 @@ pub fn revert_skip(repo: &Path) -> anyhow::Result<()> {
     run_git(repo, &["revert", "--skip"]).map(|_| ())
 }
 
+/// Diff between `HEAD:<file>` and the index version of `file` — i.e.
+/// "what's currently staged". Returns the same `FileDiff` shape as
+/// `diff_working`, so the existing renderer can reuse it.
+///
+/// Implemented via shell-out for simplicity: `git diff --cached --
+/// <file>` against the index is the canonical command, and we parse
+/// its unified-diff output. The alternative gix-based approach would
+/// require lifting more of the tree-diff plumbing out of
+/// `diff_commit` — fine to defer until we need richer features.
+pub fn diff_index(repo: &Path, file: &str) -> anyhow::Result<FileDiff> {
+    // Resolve `HEAD:<file>` to a blob (might not exist if the file is
+    // newly added). Then resolve the index entry. Use plain shell-out
+    // to keep this simple — staged diffs are usually small.
+    let head_bytes = head_blob_bytes(repo, file)?;
+    let index_bytes = index_blob_bytes(repo, file)?;
+    let (head_bytes, index_bytes) = match (head_bytes, index_bytes) {
+        (Some(h), Some(i)) => (h, i),
+        (None, Some(i)) => (Vec::new(), i),
+        (Some(h), None) => (h, Vec::new()),
+        (None, None) => anyhow::bail!("file `{file}` not present in HEAD or index"),
+    };
+    let kind = match (head_bytes.is_empty(), index_bytes.is_empty()) {
+        (true, false) => "added",
+        (false, true) => "deleted",
+        _ => "modified",
+    };
+    let is_binary = is_binary(&head_bytes) || is_binary(&index_bytes);
+    let hunks = if is_binary {
+        Vec::new()
+    } else {
+        let lang = highlight::detect_language(file);
+        let old_tokens = lang
+            .and_then(|l| highlight::highlight_per_line(&head_bytes, l))
+            .unwrap_or_default();
+        let new_tokens = lang
+            .and_then(|l| highlight::highlight_per_line(&index_bytes, l))
+            .unwrap_or_default();
+        compute_hunks(&head_bytes, &index_bytes, &old_tokens, &new_tokens)
+    };
+    Ok(FileDiff {
+        path: file.to_string(),
+        old_path: None,
+        kind: kind.into(),
+        is_binary,
+        hunks,
+    })
+}
+
+fn head_blob_bytes(repo: &Path, file: &str) -> anyhow::Result<Option<Vec<u8>>> {
+    let spec = format!("HEAD:{file}");
+    let out = std::process::Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args(["show", &spec])
+        .output()
+        .map_err(|e| anyhow::anyhow!("spawning `git show HEAD:{file}`: {e}"))?;
+    if !out.status.success() {
+        // "exists in HEAD" failures: file added, unborn HEAD, etc. Treat
+        // as absent rather than erroring.
+        return Ok(None);
+    }
+    Ok(Some(out.stdout))
+}
+
+fn index_blob_bytes(repo: &Path, file: &str) -> anyhow::Result<Option<Vec<u8>>> {
+    let spec = format!(":{file}");
+    let out = std::process::Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args(["show", &spec])
+        .output()
+        .map_err(|e| anyhow::anyhow!("spawning `git show :{file}`: {e}"))?;
+    if !out.status.success() {
+        return Ok(None);
+    }
+    Ok(Some(out.stdout))
+}
+
+/// Symmetric to `stage_hunks`: pick a subset of staged hunks and revert
+/// just those from the index, leaving the rest staged. We rebuild the
+/// diff between HEAD and the index, filter to the selected indices,
+/// serialize, and pipe through `git apply --cached --reverse --recount`.
+pub fn unstage_hunks(repo: &Path, file: &str, indices: &[usize]) -> anyhow::Result<()> {
+    if indices.is_empty() {
+        anyhow::bail!("no hunks selected");
+    }
+    let diff = diff_index(repo, file)?;
+    if diff.is_binary {
+        anyhow::bail!("cannot unstage hunks of a binary file");
+    }
+    if diff.kind != "modified" {
+        anyhow::bail!(
+            "hunk-level unstaging only supports `modified` files; got `{}`",
+            diff.kind
+        );
+    }
+    let mut selected: Vec<&DiffHunk> = Vec::with_capacity(indices.len());
+    for &i in indices {
+        let h = diff.hunks.get(i).ok_or_else(|| {
+            anyhow::anyhow!(
+                "hunk index {i} out of range (file has {} hunks)",
+                diff.hunks.len()
+            )
+        })?;
+        selected.push(h);
+    }
+    let patch = serialize_hunks_to_patch(file, &selected);
+    apply_reverse_to_index(repo, &patch)
+}
+
+fn apply_reverse_to_index(repo: &Path, patch: &str) -> anyhow::Result<()> {
+    use std::io::Write;
+    let mut child = std::process::Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args(["apply", "--cached", "--reverse", "--recount", "-"])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|e| anyhow::anyhow!("spawning `git apply --cached --reverse`: {e}"))?;
+    if let Some(mut stdin) = child.stdin.take() {
+        stdin.write_all(patch.as_bytes())?;
+    }
+    let out = child.wait_with_output()?;
+    if !out.status.success() {
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        let detail = match (stderr.trim(), stdout.trim()) {
+            ("", "") => "(no output)".to_string(),
+            ("", s) => s.to_string(),
+            (e, "") => e.to_string(),
+            (e, s) => format!("{e}\n{s}"),
+        };
+        anyhow::bail!("git apply --cached --reverse failed: {detail}");
+    }
+    Ok(())
+}
+
 /// Stage a subset of a modified file's hunks. `indices` references the
 /// hunks as they appear in `diff_working(file)`. We re-fetch that diff,
 /// filter it down to the selected hunks, serialize the result back to a
