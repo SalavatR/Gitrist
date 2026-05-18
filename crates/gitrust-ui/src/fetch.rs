@@ -4,9 +4,9 @@
 //! only needs the crate to compile for `cargo check` / docs).
 
 use gitrust_types::{
-    BlameView, BlobView, BranchInfo, CommitDiff, CommitInfo, FileDiff, NetworkOpResult,
-    RemoteBranchInfo, RepoEntry, RepoState, RepoSummary, StashEntry, StatusEntry, TagInfo,
-    TreeEntry,
+    BlameView, BlobView, BranchInfo, CommitDiff, CommitInfo, ConflictView, FileDiff,
+    NetworkOpResult, RemoteBranchInfo, RepoEntry, RepoState, RepoSummary, StashEntry, StatusEntry,
+    TagInfo, TreeEntry,
 };
 
 // `q` percent-encodes a single query-string value. Paths can contain
@@ -375,6 +375,35 @@ pub(crate) async fn post_resolve(path: &str, file: &str, side: &str) -> Result<(
     post_empty(
         "/api/repo/resolve",
         serde_json::json!({ "path": path, "file": file, "side": side }),
+    )
+    .await
+}
+
+#[cfg(target_arch = "wasm32")]
+pub(crate) async fn fetch_conflict(path: &str, file: &str) -> Result<ConflictView, String> {
+    fetch_json(&format!(
+        "/api/repo/conflict?path={}&file={}",
+        q(path),
+        q(file),
+    ))
+    .await
+}
+
+#[cfg(target_arch = "wasm32")]
+pub(crate) async fn post_resolve_hunk(
+    path: &str,
+    file: &str,
+    index: usize,
+    side: &str,
+) -> Result<(), String> {
+    post_empty(
+        "/api/repo/resolve-hunk",
+        serde_json::json!({
+            "path": path,
+            "file": file,
+            "index": index,
+            "side": side,
+        }),
     )
     .await
 }
@@ -865,6 +894,21 @@ pub(crate) async fn post_cherry_pick_continue(_path: &str) -> Result<(), String>
 
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) async fn post_resolve(_path: &str, _file: &str, _side: &str) -> Result<(), String> {
+    Err("native build: writes not implemented".into())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) async fn fetch_conflict(_path: &str, _file: &str) -> Result<ConflictView, String> {
+    Err("native build: fetching not implemented".into())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) async fn post_resolve_hunk(
+    _path: &str,
+    _file: &str,
+    _index: usize,
+    _side: &str,
+) -> Result<(), String> {
     Err("native build: writes not implemented".into())
 }
 

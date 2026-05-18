@@ -1572,3 +1572,161 @@ fn diff_refs_rejects_unknown_ref() {
     let msg = err.to_string().to_lowercase();
     assert!(msg.contains("no-such-ref") || msg.contains("resolving"));
 }
+
+fn write_conflicted_file(r: &TestRepo) -> String {
+    // Two distinct conflict blocks separated by 10 lines of identical
+    // context so git's merge driver can't fold them into one hunk.
+    let baseline =
+        "intro\nalpha\nctx1\nctx2\nctx3\nctx4\nctx5\nctx6\nctx7\nctx8\nctx9\nctx10\nbeta\nend\n";
+    r.write("shared.txt", baseline);
+    r.git(&["add", "shared.txt"]);
+    r.git(&["commit", "-q", "-m", "base"]);
+    r.git(&["checkout", "-q", "-b", "feature"]);
+    r.write(
+        "shared.txt",
+        "intro\nALPHA from feature\nctx1\nctx2\nctx3\nctx4\nctx5\nctx6\nctx7\nctx8\nctx9\nctx10\nBETA from feature\nend\n",
+    );
+    r.git(&["add", "shared.txt"]);
+    r.git(&["commit", "-q", "-m", "feature edits"]);
+    r.git(&["checkout", "-q", "master"]);
+    r.write(
+        "shared.txt",
+        "intro\nALPHA from master\nctx1\nctx2\nctx3\nctx4\nctx5\nctx6\nctx7\nctx8\nctx9\nctx10\nBETA from master\nend\n",
+    );
+    r.git(&["add", "shared.txt"]);
+    r.git(&["commit", "-q", "-m", "master edits"]);
+    let _ = gitrust_core::merge(r.path(), "feature", false);
+    "shared.txt".to_string()
+}
+
+#[test]
+fn parse_conflicts_returns_one_block_per_marker_pair() {
+    let r = TestRepo::new();
+    let file = write_conflicted_file(&r);
+
+    let view = gitrust_core::parse_conflicts(r.path(), &file).expect("parse");
+    assert_eq!(view.path, "shared.txt");
+    assert_eq!(view.blocks.len(), 2, "two regions diverge → two blocks");
+
+    let first = &view.blocks[0];
+    assert_eq!(first.index, 0);
+    assert!(first.ours_label.contains("HEAD") || !first.ours_label.is_empty());
+    assert!(first.theirs_label.contains("feature"));
+    assert!(first.ours.iter().any(|l| l.contains("from master")));
+    assert!(first.theirs.iter().any(|l| l.contains("from feature")));
+
+    let second = &view.blocks[1];
+    assert_eq!(second.index, 1);
+    assert!(second.start_line > first.end_line);
+}
+
+#[test]
+fn resolve_one_block_leaves_the_other_unresolved() {
+    let r = TestRepo::new();
+    let file = write_conflicted_file(&r);
+
+    gitrust_core::resolve_conflict_hunk(r.path(), &file, 0, "ours").expect("resolve 0");
+
+    let view = gitrust_core::parse_conflicts(r.path(), &file).expect("re-parse");
+    assert_eq!(
+        view.blocks.len(),
+        1,
+        "block 0 resolved, block 1 still there"
+    );
+    // The resolved file region carries master's text and no markers.
+    let content = std::fs::read_to_string(r.path().join(&file)).unwrap();
+    assert!(content.contains("ALPHA from master"));
+    assert!(!content.contains("ALPHA from feature"));
+    // Block 1 hasn't been touched.
+    assert!(content.contains("<<<<<<<"));
+    assert!(content.contains("BETA from master"));
+    assert!(content.contains("BETA from feature"));
+
+    // While conflicts remain we must not have called `git add`; the
+    // most direct signal is that `git status --porcelain` reports
+    // the file as still unmerged (`UU`) — adding it would flip the
+    // status to `M ` or `A `.
+    let porcelain = r.git(&["status", "--porcelain", "shared.txt"]);
+    assert!(
+        porcelain.starts_with("UU"),
+        "expected unmerged porcelain, got `{porcelain}`"
+    );
+}
+
+#[test]
+fn resolving_every_block_stages_the_file() {
+    let r = TestRepo::new();
+    let file = write_conflicted_file(&r);
+
+    gitrust_core::resolve_conflict_hunk(r.path(), &file, 0, "ours").expect("resolve 0 ours");
+    // After the first resolution the second block's index slides up
+    // — both blocks still parse from a fresh read, so the still-
+    // pending block is at index 0 now.
+    gitrust_core::resolve_conflict_hunk(r.path(), &file, 0, "theirs").expect("resolve 1 theirs");
+
+    let view = gitrust_core::parse_conflicts(r.path(), &file).expect("re-parse");
+    assert!(view.blocks.is_empty(), "all conflicts gone");
+    let content = std::fs::read_to_string(r.path().join(&file)).unwrap();
+    assert!(content.contains("ALPHA from master"));
+    assert!(content.contains("BETA from feature"));
+    assert!(!content.contains("<<<<<<<"));
+
+    let staged = gitrust_core::list_staged(r.path()).expect("staged");
+    assert!(
+        staged.iter().any(|e| e.path == "shared.txt"),
+        "fully-resolved file should be staged automatically"
+    );
+}
+
+#[test]
+fn resolve_both_ours_first_concatenates_sides() {
+    let r = TestRepo::new();
+    let file = write_conflicted_file(&r);
+
+    gitrust_core::resolve_conflict_hunk(r.path(), &file, 0, "both-ours-first")
+        .expect("resolve 0 both");
+    let content = std::fs::read_to_string(r.path().join(&file)).unwrap();
+    // Both versions of the alpha line survive, master's first.
+    let ours_pos = content.find("ALPHA from master").expect("ours present");
+    let theirs_pos = content.find("ALPHA from feature").expect("theirs present");
+    assert!(ours_pos < theirs_pos);
+}
+
+#[test]
+fn resolve_rejects_unknown_side() {
+    let r = TestRepo::new();
+    let file = write_conflicted_file(&r);
+    let err =
+        gitrust_core::resolve_conflict_hunk(r.path(), &file, 0, "mine").expect_err("bad side");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("ours") && msg.contains("theirs"),
+        "expected helpful side-list error, got `{msg}`"
+    );
+}
+
+#[test]
+fn parse_handles_diff3_style_with_base_section() {
+    let r = TestRepo::new();
+    // Synthesise a diff3-style conflict manually so the test works
+    // regardless of the host's `merge.conflictStyle` config.
+    r.write(
+        "with-base.txt",
+        "before\n<<<<<<< HEAD\nours line\n||||||| base\nbase line\n=======\ntheirs line\n>>>>>>> feature\nafter\n",
+    );
+    let view = gitrust_core::parse_conflicts(r.path(), "with-base.txt").expect("parse");
+    assert_eq!(view.blocks.len(), 1);
+    let b = &view.blocks[0];
+    assert_eq!(b.ours, vec!["ours line".to_string()]);
+    assert_eq!(b.theirs, vec!["theirs line".to_string()]);
+    assert_eq!(b.base.as_ref().map(|v| v.len()), Some(1));
+    assert_eq!(b.base.as_ref().unwrap()[0], "base line");
+}
+
+#[test]
+fn parse_returns_empty_for_clean_file() {
+    let r = TestRepo::new();
+    r.write("clean.txt", "no markers here\njust regular text\n");
+    let view = gitrust_core::parse_conflicts(r.path(), "clean.txt").expect("parse");
+    assert!(view.blocks.is_empty());
+}

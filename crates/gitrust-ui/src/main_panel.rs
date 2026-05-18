@@ -12,6 +12,8 @@ use gitrust_types::{
 
 use std::collections::HashSet;
 
+use gitrust_types::{ConflictBlock, ConflictView};
+
 use crate::diff::{render_file_diff, render_line_content};
 use crate::graph::{RowLayout, compute_graph, graph_width, render_graph_cell};
 use crate::state::BlobSelection;
@@ -247,11 +249,34 @@ pub(crate) fn render_detail(
     net_busy: Signal<bool>,
     net_result: Signal<Option<Result<gitrust_types::NetworkOpResult, String>>>,
     file_history: Signal<Option<String>>,
+    conflict_state: &Option<Result<Option<ConflictView>, String>>,
+    conflict_res: Resource<Result<Option<ConflictView>, String>>,
+    state_res: Resource<Result<gitrust_types::RepoState, String>>,
 ) -> Element {
     if selected_blob.read().is_some() {
         return render_blob_viewer(blob_state, blob_res, blame_state, blob_query, file_history);
     }
     if let Some(file) = selected_file.read().clone() {
+        // If the file is mid-conflict, render the per-hunk picker
+        // instead of the standard working-tree diff. The conflict
+        // resource is keyed on selected_file so it always tracks
+        // the current file.
+        let has_conflict = conflict_state
+            .as_ref()
+            .and_then(|r| r.as_ref().ok())
+            .and_then(|opt| opt.as_ref())
+            .is_some_and(|v| !v.blocks.is_empty());
+        if has_conflict {
+            return render_conflict_view(
+                conflict_state,
+                conflict_res,
+                state_res,
+                &file,
+                current_repo,
+                net_busy,
+                net_result,
+            );
+        }
         return render_working_detail(
             working_state,
             working_res,
@@ -268,6 +293,207 @@ pub(crate) fn render_detail(
         return render_commit_detail(commit_state, commit_res, side_by_side);
     }
     rsx! { p { class: "muted", "Select a commit, status entry, or file to inspect." } }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn render_conflict_view(
+    state: &Option<Result<Option<ConflictView>, String>>,
+    mut res: Resource<Result<Option<ConflictView>, String>>,
+    state_res: Resource<Result<gitrust_types::RepoState, String>>,
+    file: &str,
+    current_repo: Signal<String>,
+    net_busy: Signal<bool>,
+    net_result: Signal<Option<Result<gitrust_types::NetworkOpResult, String>>>,
+) -> Element {
+    match state {
+        Some(Ok(Some(view))) => {
+            let path = file.to_string();
+            let n = view.blocks.len();
+            let blocks = view.blocks.clone();
+            let busy = *net_busy.read();
+            rsx! {
+                div { class: "diff-header",
+                    div { class: "title",
+                        span { class: "kind kind-conflict", "conflict" }
+                        " "
+                        code { class: "full-oid", "{path}" }
+                    }
+                    div { class: "meta", "{n} unresolved hunk(s)" }
+                }
+                div { class: "conflict-blocks",
+                    for block in blocks {
+                        {render_conflict_block(
+                            block,
+                            path.clone(),
+                            current_repo,
+                            res,
+                            state_res,
+                            net_busy,
+                            net_result,
+                            busy,
+                        )}
+                    }
+                }
+            }
+        }
+        Some(Ok(None)) | None => rsx! { p { class: "muted", "Loading…" } },
+        Some(Err(e)) => {
+            let msg = e.clone();
+            rsx! {
+                p { class: "err",
+                    "Error: {msg} "
+                    button { class: "retry-btn", onclick: move |_| res.restart(), "Retry" }
+                }
+            }
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn render_conflict_block(
+    block: ConflictBlock,
+    file: String,
+    current_repo: Signal<String>,
+    conflict_res: Resource<Result<Option<ConflictView>, String>>,
+    state_res: Resource<Result<gitrust_types::RepoState, String>>,
+    net_busy: Signal<bool>,
+    net_result: Signal<Option<Result<gitrust_types::NetworkOpResult, String>>>,
+    busy: bool,
+) -> Element {
+    let idx = block.index;
+    let start = block.start_line;
+    let end = block.end_line;
+    let ours_label = if block.ours_label.is_empty() {
+        "ours".to_string()
+    } else {
+        block.ours_label.clone()
+    };
+    let theirs_label = if block.theirs_label.is_empty() {
+        "theirs".to_string()
+    } else {
+        block.theirs_label.clone()
+    };
+    let ours = block.ours.clone();
+    let theirs = block.theirs.clone();
+    let base = block.base.clone();
+
+    // Each button gets its own clone of the file path so the per-
+    // button closures stay FnOnce-friendly (file is a String, not Copy).
+    let file_ours = file.clone();
+    let file_theirs = file.clone();
+    let file_both1 = file.clone();
+    let file_both2 = file;
+
+    rsx! {
+        div { class: "conflict-block",
+            div { class: "conflict-header",
+                strong { "Hunk {idx + 1}" }
+                span { class: "muted small", " · lines {start}–{end}" }
+            }
+            div { class: "conflict-cols",
+                div { class: "conflict-col ours",
+                    div { class: "col-label", "{ours_label}" }
+                    pre { class: "col-body",
+                        if ours.is_empty() {
+                            span { class: "muted small", "(empty)" }
+                        } else {
+                            "{ours.join(\"\\n\")}"
+                        }
+                    }
+                }
+                if let Some(b) = base {
+                    div { class: "conflict-col base",
+                        div { class: "col-label", "base" }
+                        pre { class: "col-body",
+                            if b.is_empty() {
+                                span { class: "muted small", "(empty)" }
+                            } else {
+                                "{b.join(\"\\n\")}"
+                            }
+                        }
+                    }
+                }
+                div { class: "conflict-col theirs",
+                    div { class: "col-label", "{theirs_label}" }
+                    pre { class: "col-body",
+                        if theirs.is_empty() {
+                            span { class: "muted small", "(empty)" }
+                        } else {
+                            "{theirs.join(\"\\n\")}"
+                        }
+                    }
+                }
+            }
+            div { class: "conflict-actions",
+                button {
+                    class: "conflict-action",
+                    disabled: busy,
+                    onclick: move |_| {
+                        let p = current_repo.read().clone();
+                        fire_resolve_hunk(p, file_ours.clone(), idx, "ours",
+                            net_busy, net_result, conflict_res, state_res);
+                    },
+                    "Use ours"
+                }
+                button {
+                    class: "conflict-action",
+                    disabled: busy,
+                    onclick: move |_| {
+                        let p = current_repo.read().clone();
+                        fire_resolve_hunk(p, file_theirs.clone(), idx, "theirs",
+                            net_busy, net_result, conflict_res, state_res);
+                    },
+                    "Use theirs"
+                }
+                button {
+                    class: "conflict-action",
+                    disabled: busy,
+                    title: "Keep both sides, ours-then-theirs",
+                    onclick: move |_| {
+                        let p = current_repo.read().clone();
+                        fire_resolve_hunk(p, file_both1.clone(), idx, "both-ours-first",
+                            net_busy, net_result, conflict_res, state_res);
+                    },
+                    "Both (ours first)"
+                }
+                button {
+                    class: "conflict-action",
+                    disabled: busy,
+                    title: "Keep both sides, theirs-then-ours",
+                    onclick: move |_| {
+                        let p = current_repo.read().clone();
+                        fire_resolve_hunk(p, file_both2.clone(), idx, "both-theirs-first",
+                            net_busy, net_result, conflict_res, state_res);
+                    },
+                    "Both (theirs first)"
+                }
+            }
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn fire_resolve_hunk(
+    path: String,
+    file: String,
+    idx: usize,
+    side: &'static str,
+    mut net_busy: Signal<bool>,
+    mut net_result: Signal<Option<Result<gitrust_types::NetworkOpResult, String>>>,
+    mut conflict_res: Resource<Result<Option<ConflictView>, String>>,
+    mut state_res: Resource<Result<gitrust_types::RepoState, String>>,
+) {
+    net_busy.set(true);
+    net_result.set(None);
+    spawn(async move {
+        let r = crate::fetch::post_resolve_hunk(&path, &file, idx, side).await;
+        net_busy.set(false);
+        if let Err(e) = r {
+            net_result.set(Some(Err(e)));
+        }
+        conflict_res.restart();
+        state_res.restart();
+    });
 }
 
 fn render_blob_viewer(

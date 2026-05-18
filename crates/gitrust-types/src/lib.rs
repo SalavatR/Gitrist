@@ -160,6 +160,33 @@ pub struct BlameView {
     pub lines: Vec<BlameLine>,
 }
 
+/// A single `<<<<<<< / ======= / >>>>>>>` block inside a conflicted
+/// file. `ours_label` / `theirs_label` are what git wrote after the
+/// markers (e.g. `HEAD` and `feature`); `base` is present only on
+/// `merge.conflictStyle=diff3` outputs.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ConflictBlock {
+    /// 0-indexed within the file; the UI uses this to identify which
+    /// block a `resolve-hunk` POST targets.
+    pub index: usize,
+    /// 1-based line of the `<<<<<<<` marker.
+    pub start_line: u32,
+    /// 1-based line of the `>>>>>>>` marker.
+    pub end_line: u32,
+    pub ours: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub base: Option<Vec<String>>,
+    pub theirs: Vec<String>,
+    pub ours_label: String,
+    pub theirs_label: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ConflictView {
+    pub path: String,
+    pub blocks: Vec<ConflictBlock>,
+}
+
 /// One git repository discovered by `scan_root` under the server's
 /// configured root directory. The UI renders these in a Workspaces
 /// sidebar block; clicking one switches the active repo.

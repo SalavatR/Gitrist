@@ -58,7 +58,11 @@ What works today:
   revert hits a conflict, a banner above the main panel surfaces
   the in-progress state, the conflicted file list with per-file
   Use-ours / Use-theirs buttons, and Abort / Skip / Continue
-  controls (Skip available for rebase / revert).
+  controls (Skip available for rebase / revert). Clicking a
+  conflicted file in the sidebar opens a per-block view with
+  side-by-side ours/theirs columns and per-block buttons —
+  including "Both (ours first)" / "Both (theirs first)" — so
+  mixed resolutions can be made without dropping to the CLI.
 - History view: log endpoint accepts `all=true` to walk every
   local + remote-tracking branch tip — visible as an "All
   branches" toggle next to the history filter. The log block is
@@ -96,9 +100,6 @@ Deferred:
 - Streaming progress for long fetch/push (current implementation
   blocks until the git CLI completes; UI shows "Working…" the
   whole time).
-- Per-hunk conflict resolution (UI currently picks ours/theirs
-  per *file*; an in-place 3-way hunk picker is the natural
-  next step).
 - Unstage by hunks — symmetric counterpart to the staging flow;
   needs a `staged-vs-HEAD` diff endpoint to feed the picker.
 - Line-level staging — checkbox per `add`/`del` line, currently

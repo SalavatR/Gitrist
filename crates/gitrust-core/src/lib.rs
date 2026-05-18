@@ -6,9 +6,9 @@ use gix::bstr::ByteSlice;
 use gix::diff::blob::{Algorithm, InternedInput, Token as IDToken};
 
 pub use gitrust_types::{
-    BlameLine, BlameView, BlobLine, BlobView, BranchInfo, CommitDiff, CommitInfo, DiffHunk,
-    DiffLine, FileDiff, NetworkOpResult, RemoteBranchInfo, RepoEntry, RepoState, RepoSummary,
-    StashEntry, StatusEntry, TagInfo, Token, TreeEntry,
+    BlameLine, BlameView, BlobLine, BlobView, BranchInfo, CommitDiff, CommitInfo, ConflictBlock,
+    ConflictView, DiffHunk, DiffLine, FileDiff, NetworkOpResult, RemoteBranchInfo, RepoEntry,
+    RepoState, RepoSummary, StashEntry, StatusEntry, TagInfo, Token, TreeEntry,
 };
 
 fn build_commit_info(repo: &gix::Repository, oid: gix::ObjectId) -> anyhow::Result<CommitInfo> {
@@ -1438,6 +1438,145 @@ pub fn resolve_file(repo: &Path, file: &str, side: &str) -> anyhow::Result<()> {
     };
     run_git(repo, &["checkout", flag, "--", file])?;
     run_git(repo, &["add", "--", file])?;
+    Ok(())
+}
+
+/// Parse a conflicted file from the worktree into a `ConflictView`.
+/// Recognises both 2-way (`<<<<<<< / ======= / >>>>>>>`) and 3-way
+/// (`<<<<<<< / ||||||| / ======= / >>>>>>>`, set by `merge.conflictStyle
+/// = diff3`) marker layouts. Returns an empty `blocks` list when the
+/// file has no markers — useful for the UI to detect "all hunks
+/// resolved" without a separate endpoint.
+pub fn parse_conflicts(repo: &Path, file: &str) -> anyhow::Result<ConflictView> {
+    let full = repo.join(file);
+    let content = std::fs::read_to_string(&full)
+        .map_err(|e| anyhow::anyhow!("reading `{}`: {e}", full.display()))?;
+    let mut blocks: Vec<ConflictBlock> = Vec::new();
+    let mut section = Section::None;
+    let mut current: Option<ConflictBlock> = None;
+    for (i, line) in content.lines().enumerate() {
+        let lineno = (i + 1) as u32;
+        if let Some(rest) = line.strip_prefix("<<<<<<<") {
+            current = Some(ConflictBlock {
+                index: blocks.len(),
+                start_line: lineno,
+                end_line: lineno,
+                ours: Vec::new(),
+                base: None,
+                theirs: Vec::new(),
+                ours_label: rest.trim().to_string(),
+                theirs_label: String::new(),
+            });
+            section = Section::Ours;
+        } else if line.starts_with("|||||||") && current.is_some() {
+            if let Some(b) = current.as_mut() {
+                b.base = Some(Vec::new());
+            }
+            section = Section::Base;
+        } else if line == "=======" && current.is_some() {
+            section = Section::Theirs;
+        } else if let Some(rest) = line.strip_prefix(">>>>>>>") {
+            if let Some(mut b) = current.take() {
+                b.end_line = lineno;
+                b.theirs_label = rest.trim().to_string();
+                blocks.push(b);
+            }
+            section = Section::None;
+        } else if let Some(b) = current.as_mut() {
+            match section {
+                Section::Ours => b.ours.push(line.to_string()),
+                Section::Base => {
+                    if let Some(base) = b.base.as_mut() {
+                        base.push(line.to_string());
+                    }
+                }
+                Section::Theirs => b.theirs.push(line.to_string()),
+                Section::None => {}
+            }
+        }
+    }
+    Ok(ConflictView {
+        path: file.to_string(),
+        blocks,
+    })
+}
+
+#[derive(Copy, Clone)]
+enum Section {
+    None,
+    Ours,
+    Base,
+    Theirs,
+}
+
+/// Resolve a single conflict block by replacing its `<<<<<<< / =======
+/// / >>>>>>>` span with the chosen side. `side` accepts `"ours"`,
+/// `"theirs"`, `"both-ours-first"`, or `"both-theirs-first"`. When the
+/// resolution leaves the file with no remaining conflict markers, we
+/// `git add` it so a subsequent `merge --continue` / `cherry-pick
+/// --continue` sees a clean staged copy; otherwise the file stays
+/// unstaged for the UI to walk through the next block.
+pub fn resolve_conflict_hunk(
+    repo: &Path,
+    file: &str,
+    index: usize,
+    side: &str,
+) -> anyhow::Result<()> {
+    let view = parse_conflicts(repo, file)?;
+    let block = view
+        .blocks
+        .get(index)
+        .ok_or_else(|| anyhow::anyhow!("hunk index {index} out of range"))?;
+    let replacement: Vec<String> = match side.trim() {
+        "ours" => block.ours.clone(),
+        "theirs" => block.theirs.clone(),
+        "both-ours-first" => {
+            let mut v = block.ours.clone();
+            v.extend(block.theirs.clone());
+            v
+        }
+        "both-theirs-first" => {
+            let mut v = block.theirs.clone();
+            v.extend(block.ours.clone());
+            v
+        }
+        other => anyhow::bail!(
+            "resolve side must be `ours`, `theirs`, `both-ours-first`, or `both-theirs-first`, got `{other}`"
+        ),
+    };
+
+    let full = repo.join(file);
+    let content = std::fs::read_to_string(&full)
+        .map_err(|e| anyhow::anyhow!("reading `{}`: {e}", full.display()))?;
+    // The line iterator drops the trailing newline; rebuild line-by-line
+    // and re-add the original terminator if there was one.
+    let mut out: Vec<String> = Vec::new();
+    let start = block.start_line as usize;
+    let end = block.end_line as usize;
+    for (i, line) in content.lines().enumerate() {
+        let lineno = i + 1;
+        if lineno < start || lineno > end {
+            out.push(line.to_string());
+        } else if lineno == start {
+            for r in &replacement {
+                out.push(r.clone());
+            }
+        }
+    }
+    let trailing_newline = content.ends_with('\n');
+    let mut joined = out.join("\n");
+    if trailing_newline {
+        joined.push('\n');
+    }
+    std::fs::write(&full, joined.as_bytes())?;
+
+    // Re-parse to see if anything is left. Stage only when clean —
+    // git refuses `merge --continue` while any conflict remains, but
+    // we don't want to stage a still-conflicting file either.
+    let after = parse_conflicts(repo, file)?;
+    if after.blocks.is_empty() {
+        run_git(repo, &["add", "--", file])?;
+    }
     Ok(())
 }
 

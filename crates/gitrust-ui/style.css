@@ -704,6 +704,86 @@ details.tree-folder summary.tree-folder-row::-webkit-details-marker { display: n
   font-size: 0.8rem;
   cursor: pointer;
 }
+.conflict-blocks {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+.conflict-block {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  padding: 0.7rem;
+}
+.conflict-header {
+  margin-bottom: 0.5rem;
+  font-size: 0.85rem;
+}
+.conflict-cols {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.4rem;
+  margin-bottom: 0.5rem;
+}
+.conflict-block .conflict-cols:has(.base) {
+  grid-template-columns: 1fr 1fr 1fr;
+}
+.conflict-col {
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.conflict-col.ours {
+  border-color: var(--add);
+}
+.conflict-col.theirs {
+  border-color: var(--del);
+}
+.conflict-col .col-label {
+  padding: 0.25rem 0.45rem;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  background: var(--surface-2);
+  color: var(--muted);
+}
+.conflict-col.ours .col-label { color: var(--add); }
+.conflict-col.theirs .col-label { color: var(--del); }
+.conflict-col .col-body {
+  margin: 0;
+  padding: 0.45rem 0.6rem;
+  white-space: pre-wrap;
+  font-family: ui-monospace, "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
+  font-size: 0.82rem;
+  background: var(--surface);
+  max-height: 16rem;
+  overflow: auto;
+}
+.conflict-actions {
+  display: flex;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+}
+.conflict-action {
+  padding: 0.35rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  color: var(--text-2);
+  cursor: pointer;
+  font-size: 0.8rem;
+  font-weight: 500;
+}
+.conflict-action:hover:not(:disabled) {
+  background: var(--accent-bg);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.conflict-action:disabled {
+  opacity: 0.5;
+  cursor: progress;
+}
+
 .file-history-chip {
   display: inline-flex;
   align-items: center;

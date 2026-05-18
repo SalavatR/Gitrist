@@ -197,6 +197,20 @@ fn AppContent() -> Element {
         let path = current_repo.read().clone();
         async move { fetch_state(&path).await }
     });
+    // Conflict view: when a worktree file is selected AND it has
+    // conflict markers, we replace the regular working-diff panel
+    // with a per-block ours/theirs picker. Keyed on selected_file
+    // so swapping selection drops the previous fetch.
+    let conflict_view = use_resource(move || {
+        let path = current_repo.read().clone();
+        let file = selected_file.read().clone();
+        async move {
+            match file {
+                Some(f) => fetch::fetch_conflict(&path, &f).await.map(Some),
+                None => Ok::<Option<gitrust_types::ConflictView>, String>(None),
+            }
+        }
+    });
     // Workspaces (multi-repo browser). Empty list = no `--root` set on
     // the server → we hide the sidebar block entirely. Doesn't depend
     // on `current_repo`, so it only fetches once per session unless
@@ -1104,6 +1118,9 @@ fn AppContent() -> Element {
                             net_busy,
                             net_result,
                             file_history,
+                            &conflict_view.read_unchecked(),
+                            conflict_view,
+                            state,
                         )}
                     }
                 }

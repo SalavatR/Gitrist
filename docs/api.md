@@ -848,6 +848,49 @@ curl -H "Authorization: Bearer $TOKEN" \
 Unknown refs surface as a 400 with the unresolved name in the
 message.
 
+### `GET /api/repo/conflict?path=&file=`
+
+Returns the per-block view of a conflicted file. The file is parsed
+straight from the worktree — we look for `<<<<<<< / ======= / >>>>>>>`
+markers (with the optional `|||||||` diff3 base section in between),
+emit one `ConflictBlock` per `<<<<<<< … >>>>>>>` pair.
+
+```json
+{
+  "path": "src/a.rs",
+  "blocks": [
+    {
+      "index": 0,
+      "start_line": 12,
+      "end_line": 24,
+      "ours": ["line from HEAD"],
+      "base": null,
+      "theirs": ["line from feature"],
+      "ours_label": "HEAD",
+      "theirs_label": "feature"
+    }
+  ]
+}
+```
+
+`base` is `null` unless the user has `merge.conflictStyle=diff3`.
+When the file has no conflict markers, `blocks` is `[]` — useful to
+detect "all hunks resolved" without polling status.
+
+### `POST /api/repo/resolve-hunk`
+
+```json
+{ "path": "...", "file": "src/a.rs", "index": 0, "side": "ours" }
+```
+
+`side` is one of `"ours"`, `"theirs"`, `"both-ours-first"`, or
+`"both-theirs-first"`. Replaces the indexed block in the worktree
+file with the chosen content. When the resolution leaves the file
+with no remaining markers we `git add` it so a subsequent
+`merge --continue` / `cherry-pick --continue` sees a clean stage;
+otherwise the file stays unstaged so the UI walks through the next
+block.
+
 ### `POST /api/repo/stage-hunks`
 
 ```json

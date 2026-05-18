@@ -15,20 +15,22 @@ use tower_http::services::ServeDir;
 use tower_http::trace::TraceLayer;
 
 use gitrust_core::{
-    BlameView, BlobView, BranchInfo, CommitDiff, CommitInfo, DEFAULT_SCAN_DEPTH, FileDiff,
-    NetworkOpResult, RemoteBranchInfo, RepoEntry, RepoState, RepoSummary, StashEntry, StatusEntry,
-    TagInfo, TreeEntry, blame_file, checkout as core_checkout, cherry_pick as core_cherry_pick,
-    cherry_pick_abort as core_cherry_pick_abort, cherry_pick_continue as core_cherry_pick_continue,
-    commit as core_commit, commit_info, create_branch as core_create_branch,
-    create_tag as core_create_tag, delete_branch as core_delete_branch,
-    delete_tag as core_delete_tag, diff_commit, diff_refs as core_diff_refs, diff_working,
-    discard_files, fetch as core_fetch, list_branches, list_remote_branches, list_staged,
-    list_status, list_tags, list_tree, log_commits, log_file as core_log_file, merge as core_merge,
-    merge_abort as core_merge_abort, merge_continue as core_merge_continue, pull as core_pull,
-    push as core_push, rebase as core_rebase, rebase_abort as core_rebase_abort,
+    BlameView, BlobView, BranchInfo, CommitDiff, CommitInfo, ConflictView, DEFAULT_SCAN_DEPTH,
+    FileDiff, NetworkOpResult, RemoteBranchInfo, RepoEntry, RepoState, RepoSummary, StashEntry,
+    StatusEntry, TagInfo, TreeEntry, blame_file, checkout as core_checkout,
+    cherry_pick as core_cherry_pick, cherry_pick_abort as core_cherry_pick_abort,
+    cherry_pick_continue as core_cherry_pick_continue, commit as core_commit, commit_info,
+    create_branch as core_create_branch, create_tag as core_create_tag,
+    delete_branch as core_delete_branch, delete_tag as core_delete_tag, diff_commit,
+    diff_refs as core_diff_refs, diff_working, discard_files, fetch as core_fetch, list_branches,
+    list_remote_branches, list_staged, list_status, list_tags, list_tree, log_commits,
+    log_file as core_log_file, merge as core_merge, merge_abort as core_merge_abort,
+    merge_continue as core_merge_continue, parse_conflicts as core_parse_conflicts,
+    pull as core_pull, push as core_push, rebase as core_rebase, rebase_abort as core_rebase_abort,
     rebase_continue as core_rebase_continue, rebase_skip as core_rebase_skip,
     rename_branch as core_rename_branch, repo_state as core_repo_state, reset as core_reset,
-    resolve_file as core_resolve_file, revert as core_revert, revert_abort as core_revert_abort,
+    resolve_conflict_hunk as core_resolve_conflict_hunk, resolve_file as core_resolve_file,
+    revert as core_revert, revert_abort as core_revert_abort,
     revert_continue as core_revert_continue, revert_skip as core_revert_skip, scan_root, show_blob,
     stage_files as core_stage_files, stage_hunks as core_stage_hunks,
     stash_drop as core_stash_drop, stash_list as core_stash_list, stash_pop as core_stash_pop,
@@ -544,6 +546,37 @@ struct ResolveBody {
     file: String,
     /// `"ours"` | `"theirs"` — which side of the merge to keep.
     side: String,
+}
+
+async fn repo_conflict(Query(q): Query<DiffWorkingQuery>) -> Result<Json<ConflictView>, ApiError> {
+    let path = PathBuf::from(q.path);
+    core_parse_conflicts(&path, &q.file)
+        .map(Json)
+        .map_err(ApiError::from)
+}
+
+#[derive(Deserialize)]
+struct ResolveHunkBody {
+    path: String,
+    file: String,
+    index: usize,
+    /// `"ours"` | `"theirs"` | `"both-ours-first"` | `"both-theirs-first"`.
+    side: String,
+}
+
+async fn repo_resolve_hunk(Json(body): Json<ResolveHunkBody>) -> Result<StatusCode, ApiError> {
+    let ResolveHunkBody {
+        path,
+        file,
+        index,
+        side,
+    } = body;
+    let repo = PathBuf::from(path);
+    tokio::task::spawn_blocking(move || core_resolve_conflict_hunk(&repo, &file, index, &side))
+        .await
+        .map_err(|e| anyhow::anyhow!("join error: {e}"))?
+        .map_err(ApiError::from)?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 async fn repo_resolve(Json(body): Json<ResolveBody>) -> Result<StatusCode, ApiError> {
@@ -1228,6 +1261,8 @@ pub fn router(source: WebSource, auth: AuthState) -> Router {
         )
         .route("/repo/resolve", post(repo_resolve))
         .route("/repo/stage-hunks", post(repo_stage_hunks))
+        .route("/repo/conflict", get(repo_conflict))
+        .route("/repo/resolve-hunk", post(repo_resolve_hunk))
         .route("/repo/rebase", post(repo_rebase))
         .route("/repo/rebase/abort", post(repo_rebase_abort))
         .route("/repo/rebase/continue", post(repo_rebase_continue))

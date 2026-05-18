@@ -216,6 +216,25 @@ within each section.
       arrives within the debounce window. UI snapshot tests not
       yet (no Dioxus story support that I've found).
 
+## Per-hunk conflict resolution
+
+- [x] `parse_conflicts(repo, file)` reads a conflicted worktree file
+      and returns one `ConflictBlock` per `<<<<<<< / ======= /
+      >>>>>>>` pair, with optional `||||||| base` section for diff3
+      style. `resolve_conflict_hunk(file, index, side)` rewrites
+      the file replacing the indexed block with the chosen content
+      (`ours` / `theirs` / `both-ours-first` / `both-theirs-first`)
+      and `git add`s only when the file has no remaining markers,
+      so a partially-resolved file stays unstaged. Exposed as
+      `GET /api/repo/conflict` + `POST /api/repo/resolve-hunk`.
+      UI swaps the working-diff panel for a per-block picker when
+      the selected file has conflicts: each block shows ours /
+      theirs (and base when present) side by side with four
+      buttons. Seven new core tests cover 2-way + diff3 parsing,
+      one-block resolve leaves the rest, resolving every block
+      stages, both-ours-first concatenates, and unknown-side
+      rejection.
+
 ## Tags, file history, arbitrary-ref diff
 
 - [x] Tag CRUD: `create_tag(name, target?, message?)` and
