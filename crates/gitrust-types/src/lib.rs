@@ -222,6 +222,24 @@ pub struct RepoState {
     pub conflicted: Vec<String>,
 }
 
+/// Live state of an asynchronous network operation. The UI POSTs to
+/// `/api/repo/{fetch,pull,push}-async`, gets back an `op_id`, and then
+/// polls `/api/repo/op-progress?id=<op_id>` every ~500 ms to render
+/// stderr-as-it-happens in the banner.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct OpProgress {
+    pub op_id: String,
+    /// `"fetch"` | `"pull"` | `"push"`.
+    pub op: String,
+    /// `"running"` | `"done"` | `"failed"`.
+    pub status: String,
+    pub lines: Vec<String>,
+    /// Set once `status` is `"done"` / `"failed"`. Newline-joined view
+    /// of every line we captured, for convenient one-shot display.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub summary: Option<String>,
+}
+
 /// Result of a network operation (`fetch`, `pull`, `push`). `summary`
 /// is the human-readable output the git CLI produced (mostly stderr;
 /// stdout appended when non-empty). UIs surface it as-is so the user

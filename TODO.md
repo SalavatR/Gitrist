@@ -216,6 +216,48 @@ within each section.
       arrives within the debounce window. UI snapshot tests not
       yet (no Dioxus story support that I've found).
 
+## Streaming progress for fetch / pull / push
+
+- [x] `AuthState` grew an `Arc<RwLock<HashMap<String, OpProgress>>>`
+      that holds the live state of every running async op.
+      `POST /api/repo/{fetch,pull,push}-async` spawns a tokio task
+      that runs `git` via `tokio::process::Command`, pipes stderr +
+      stdout into the buffer line-by-line via `BufReader::lines`,
+      and transitions the entry to `done` / `failed` on process
+      exit. The handler returns the `op_id` immediately. UI's
+      Fetch / Pull / Push buttons now dispatch to the async
+      endpoints and poll `GET /api/repo/op-progress?id=…` every
+      500 ms; the banner shows a "Working…" header with the line
+      count plus a scrollable `<pre>` carrying everything git has
+      emitted so far. The sync POST endpoints stay for API
+      parity (curl scripting), marked `#[allow(dead_code)]` in
+      the UI fetch wrappers.
+
+## Ref-diff UI
+
+- [x] A new "Compare refs" sidebar block with `from` / `to` text
+      inputs and a Compare button. Submit sets `compare_refs:
+      Signal<Option<(String, String)>>`; a fresh resource calls
+      `fetch_diff_refs` and the detail panel takes precedence
+      over every other selection, rendering each file with the
+      existing `render_file_diff` (rename / copy detection +
+      tree-sitter token highlighting come along).
+
+## Unstage by hunks
+
+- [x] `diff_index(file)` shells out to `git show HEAD:<file>` +
+      `git show :<file>` and runs them through the same
+      imara-diff hunk builder we use for working diffs.
+      `unstage_hunks(file, indices)` re-fetches that diff, filters
+      to the picked hunks, serializes, and pipes through
+      `git apply --cached --reverse --recount` — the mirror of
+      `stage_hunks`. Endpoint trio:
+      `GET /api/repo/diff/index`, `POST /api/repo/unstage-hunks`.
+      UI: a "⌥" button on `modified` rows in the Staged sidebar
+      sets `unstage_target`; the detail panel takes priority over
+      every other selection and renders the staged-vs-HEAD diff
+      with per-hunk checkboxes and an "Unstage N hunk(s)" action.
+
 ## Per-hunk conflict resolution
 
 - [x] `parse_conflicts(repo, file)` reads a conflicted worktree file

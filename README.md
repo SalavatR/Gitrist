@@ -30,7 +30,11 @@ What works today:
 - Network ops: `fetch`, `pull` (`--ff-only` by default), and
   `push` (`-u` / `--force-with-lease` flags optional). All shell
   out to the user's `git` binary so SSH agents and HTTPS
-  credential helpers Just Work.
+  credential helpers Just Work. The UI dispatches to async
+  endpoints (`POST /api/repo/{fetch,pull,push}-async` →
+  `op_id`) and polls `GET /api/repo/op-progress` every 500 ms,
+  so the banner streams git's stderr as the op runs instead
+  of blocking on the final summary.
 - History-movers: `merge` (with `--no-ff` opt-in), `cherry-pick`,
   `rebase`, `revert`, and `reset` (with `soft`/`mixed`/`hard`
   modes), all reachable as buttons in the commit-detail toolbar
@@ -100,8 +104,6 @@ Deferred:
 - Streaming progress for long fetch/push (current implementation
   blocks until the git CLI completes; UI shows "Working…" the
   whole time).
-- Unstage by hunks — symmetric counterpart to the staging flow;
-  needs a `staged-vs-HEAD` diff endpoint to feed the picker.
 - Line-level staging — checkbox per `add`/`del` line, currently
   per-hunk only.
 - Server-side path clamping when `--root` is set — currently the

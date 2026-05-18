@@ -89,6 +89,43 @@ fn AuthGate() -> Element {
     }
 }
 
+/// Poll `/api/repo/op-progress?id=<op_id>` every 500 ms, updating
+/// `progress_lines` with whatever git has emitted so far. When the
+/// server-side state transitions to `done` or `failed`, we write the
+/// final summary into `net_result` and return. The caller is expected
+/// to flip `net_busy` to `false` after this future resolves.
+async fn poll_op_until_done(
+    op_id: String,
+    mut progress_lines: Signal<Vec<String>>,
+    mut net_result: Signal<Option<Result<NetworkOpResult, String>>>,
+) {
+    loop {
+        sleep_ms(500).await;
+        match fetch::fetch_op_progress(&op_id).await {
+            Ok(p) => {
+                progress_lines.set(p.lines.clone());
+                if p.status != "running" {
+                    let summary = p.summary.unwrap_or_else(|| p.lines.join("\n"));
+                    if p.status == "done" {
+                        net_result.set(Some(Ok(NetworkOpResult {
+                            op: p.op,
+                            remote: String::new(),
+                            summary,
+                        })));
+                    } else {
+                        net_result.set(Some(Err(summary)));
+                    }
+                    return;
+                }
+            }
+            Err(e) => {
+                net_result.set(Some(Err(e)));
+                return;
+            }
+        }
+    }
+}
+
 #[component]
 fn AppContent() -> Element {
     let initial = initial_repo();
@@ -111,6 +148,10 @@ fn AppContent() -> Element {
     let blob_query = use_signal(String::new);
     let mut net_busy = use_signal(|| false);
     let mut net_result = use_signal(|| None::<Result<NetworkOpResult, String>>);
+    // Live lines from a streaming network op (fetch / pull / push). The
+    // banner renders them while `net_busy` is true; the op handlers
+    // clear them when starting a new op and again when finishing.
+    let mut progress_lines = use_signal(Vec::<String>::new);
     let mut reset_mode = use_signal(|| "mixed".to_string());
     let mut hunk_picker = use_signal(std::collections::HashSet::<usize>::new);
     // Unstage-by-hunks lives in its own slot — set via the "⌥" button
@@ -449,15 +490,22 @@ fn AppContent() -> Element {
                             button {
                                 class: "net-btn",
                                 disabled: busy,
-                                title: "git fetch (default remote)",
+                                title: "git fetch (default remote, streaming)",
                                 onclick: move |_| {
                                     let path = current_repo.read().clone();
                                     net_busy.set(true);
                                     net_result.set(None);
+                                    progress_lines.set(Vec::new());
                                     spawn(async move {
-                                        let r = fetch::post_fetch(&path, None).await;
+                                        match fetch::post_fetch_async(&path, None).await {
+                                            Ok(op_id) => {
+                                                poll_op_until_done(
+                                                    op_id, progress_lines, net_result,
+                                                ).await;
+                                            }
+                                            Err(e) => net_result.set(Some(Err(e))),
+                                        }
                                         net_busy.set(false);
-                                        net_result.set(Some(r));
                                     });
                                 },
                                 "Fetch"
@@ -465,15 +513,22 @@ fn AppContent() -> Element {
                             button {
                                 class: "net-btn",
                                 disabled: busy,
-                                title: "git pull --ff-only",
+                                title: "git pull --ff-only (streaming)",
                                 onclick: move |_| {
                                     let path = current_repo.read().clone();
                                     net_busy.set(true);
                                     net_result.set(None);
+                                    progress_lines.set(Vec::new());
                                     spawn(async move {
-                                        let r = fetch::post_pull(&path, None, true).await;
+                                        match fetch::post_pull_async(&path, None, true).await {
+                                            Ok(op_id) => {
+                                                poll_op_until_done(
+                                                    op_id, progress_lines, net_result,
+                                                ).await;
+                                            }
+                                            Err(e) => net_result.set(Some(Err(e))),
+                                        }
                                         net_busy.set(false);
-                                        net_result.set(Some(r));
                                     });
                                 },
                                 "Pull"
@@ -481,17 +536,26 @@ fn AppContent() -> Element {
                             button {
                                 class: "net-btn",
                                 disabled: busy,
-                                title: "git push (current branch to its upstream)",
+                                title: "git push (current branch to its upstream, streaming)",
                                 onclick: move |_| {
                                     let path = current_repo.read().clone();
                                     net_busy.set(true);
                                     net_result.set(None);
+                                    progress_lines.set(Vec::new());
                                     spawn(async move {
-                                        let r = fetch::post_push(
+                                        match fetch::post_push_async(
                                             &path, None, None, false, false,
-                                        ).await;
+                                        )
+                                        .await
+                                        {
+                                            Ok(op_id) => {
+                                                poll_op_until_done(
+                                                    op_id, progress_lines, net_result,
+                                                ).await;
+                                            }
+                                            Err(e) => net_result.set(Some(Err(e))),
+                                        }
                                         net_busy.set(false);
-                                        net_result.set(Some(r));
                                     });
                                 },
                                 "Push"
@@ -700,11 +764,29 @@ fn AppContent() -> Element {
                 let result = net_result.read().clone();
                 let busy = *net_busy.read();
                 match (busy, result) {
-                    (true, _) => rsx! {
-                        div { class: "net-banner muted",
-                            "Working…"
+                    (true, _) => {
+                        let lines = progress_lines.read().clone();
+                        let body = lines.join("\n");
+                        rsx! {
+                            div { class: "net-banner muted",
+                                div { class: "net-banner-head",
+                                    strong { "Working…" }
+                                    span { class: "small",
+                                        if lines.is_empty() {
+                                            ""
+                                        } else if lines.len() == 1 {
+                                            "1 line of progress"
+                                        } else {
+                                            "{lines.len()} lines of progress"
+                                        }
+                                    }
+                                }
+                                if !lines.is_empty() {
+                                    pre { class: "net-banner-body", "{body}" }
+                                }
+                            }
                         }
-                    },
+                    }
                     (false, Some(Ok(r))) => rsx! {
                         div { class: "net-banner ok",
                             div { class: "net-banner-head",

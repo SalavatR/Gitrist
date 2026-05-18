@@ -7,8 +7,8 @@ use gix::diff::blob::{Algorithm, InternedInput, Token as IDToken};
 
 pub use gitrust_types::{
     BlameLine, BlameView, BlobLine, BlobView, BranchInfo, CommitDiff, CommitInfo, ConflictBlock,
-    ConflictView, DiffHunk, DiffLine, FileDiff, NetworkOpResult, RemoteBranchInfo, RepoEntry,
-    RepoState, RepoSummary, StashEntry, StatusEntry, TagInfo, Token, TreeEntry,
+    ConflictView, DiffHunk, DiffLine, FileDiff, NetworkOpResult, OpProgress, RemoteBranchInfo,
+    RepoEntry, RepoState, RepoSummary, StashEntry, StatusEntry, TagInfo, Token, TreeEntry,
 };
 
 fn build_commit_info(repo: &gix::Repository, oid: gix::ObjectId) -> anyhow::Result<CommitInfo> {

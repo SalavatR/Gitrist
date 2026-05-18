@@ -5,8 +5,8 @@
 
 use gitrust_types::{
     BlameView, BlobView, BranchInfo, CommitDiff, CommitInfo, ConflictView, FileDiff,
-    NetworkOpResult, RemoteBranchInfo, RepoEntry, RepoState, RepoSummary, StashEntry, StatusEntry,
-    TagInfo, TreeEntry,
+    NetworkOpResult, OpProgress, RemoteBranchInfo, RepoEntry, RepoState, RepoSummary, StashEntry,
+    StatusEntry, TagInfo, TreeEntry,
 };
 
 // `q` percent-encodes a single query-string value. Paths can contain
@@ -264,6 +264,71 @@ pub(crate) async fn post_branch_rename(path: &str, old: &str, new: &str) -> Resu
 }
 
 #[cfg(target_arch = "wasm32")]
+pub(crate) async fn post_fetch_async(path: &str, remote: Option<&str>) -> Result<String, String> {
+    let mut body = serde_json::json!({ "path": path });
+    if let Some(r) = remote.filter(|s| !s.trim().is_empty()) {
+        body["remote"] = serde_json::Value::String(r.to_string());
+    }
+    let v: serde_json::Value = post_with_response("/api/repo/fetch-async", body).await?;
+    v.get("op_id")
+        .and_then(|x| x.as_str())
+        .map(|s| s.to_string())
+        .ok_or_else(|| "no op_id returned".into())
+}
+
+#[cfg(target_arch = "wasm32")]
+pub(crate) async fn post_pull_async(
+    path: &str,
+    remote: Option<&str>,
+    ff_only: bool,
+) -> Result<String, String> {
+    let mut body = serde_json::json!({ "path": path, "ff_only": ff_only });
+    if let Some(r) = remote.filter(|s| !s.trim().is_empty()) {
+        body["remote"] = serde_json::Value::String(r.to_string());
+    }
+    let v: serde_json::Value = post_with_response("/api/repo/pull-async", body).await?;
+    v.get("op_id")
+        .and_then(|x| x.as_str())
+        .map(|s| s.to_string())
+        .ok_or_else(|| "no op_id returned".into())
+}
+
+#[cfg(target_arch = "wasm32")]
+pub(crate) async fn post_push_async(
+    path: &str,
+    remote: Option<&str>,
+    refspec: Option<&str>,
+    force_with_lease: bool,
+    set_upstream: bool,
+) -> Result<String, String> {
+    let mut body = serde_json::json!({
+        "path": path,
+        "force_with_lease": force_with_lease,
+        "set_upstream": set_upstream,
+    });
+    if let Some(r) = remote.filter(|s| !s.trim().is_empty()) {
+        body["remote"] = serde_json::Value::String(r.to_string());
+    }
+    if let Some(rs) = refspec.filter(|s| !s.trim().is_empty()) {
+        body["refspec"] = serde_json::Value::String(rs.to_string());
+    }
+    let v: serde_json::Value = post_with_response("/api/repo/push-async", body).await?;
+    v.get("op_id")
+        .and_then(|x| x.as_str())
+        .map(|s| s.to_string())
+        .ok_or_else(|| "no op_id returned".into())
+}
+
+#[cfg(target_arch = "wasm32")]
+pub(crate) async fn fetch_op_progress(id: &str) -> Result<OpProgress, String> {
+    fetch_json(&format!("/api/repo/op-progress?id={}", q(id))).await
+}
+
+// Synchronous flavours. Kept for API parity (and so external curl-style
+// callers don't have to poll), even though the UI now goes through the
+// async + polling path for live progress.
+#[cfg(target_arch = "wasm32")]
+#[allow(dead_code)]
 pub(crate) async fn post_fetch(
     path: &str,
     remote: Option<&str>,
@@ -276,6 +341,7 @@ pub(crate) async fn post_fetch(
 }
 
 #[cfg(target_arch = "wasm32")]
+#[allow(dead_code)]
 pub(crate) async fn post_pull(
     path: &str,
     remote: Option<&str>,
@@ -289,6 +355,7 @@ pub(crate) async fn post_pull(
 }
 
 #[cfg(target_arch = "wasm32")]
+#[allow(dead_code)]
 pub(crate) async fn post_push(
     path: &str,
     remote: Option<&str>,
@@ -847,6 +914,37 @@ pub(crate) async fn post_pick_folder() -> Result<Option<String>, String> {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
+pub(crate) async fn post_fetch_async(_path: &str, _remote: Option<&str>) -> Result<String, String> {
+    Err("native build: writes not implemented".into())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) async fn post_pull_async(
+    _path: &str,
+    _remote: Option<&str>,
+    _ff_only: bool,
+) -> Result<String, String> {
+    Err("native build: writes not implemented".into())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) async fn post_push_async(
+    _path: &str,
+    _remote: Option<&str>,
+    _refspec: Option<&str>,
+    _force_with_lease: bool,
+    _set_upstream: bool,
+) -> Result<String, String> {
+    Err("native build: writes not implemented".into())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) async fn fetch_op_progress(_id: &str) -> Result<OpProgress, String> {
+    Err("native build: fetching not implemented".into())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(dead_code)]
 pub(crate) async fn post_fetch(
     _path: &str,
     _remote: Option<&str>,
@@ -855,6 +953,7 @@ pub(crate) async fn post_fetch(
 }
 
 #[cfg(not(target_arch = "wasm32"))]
+#[allow(dead_code)]
 pub(crate) async fn post_pull(
     _path: &str,
     _remote: Option<&str>,
@@ -864,6 +963,7 @@ pub(crate) async fn post_pull(
 }
 
 #[cfg(not(target_arch = "wasm32"))]
+#[allow(dead_code)]
 pub(crate) async fn post_push(
     _path: &str,
     _remote: Option<&str>,

@@ -681,6 +681,30 @@ list and the worktree is partially merged.
 
 `git stash drop stash@{index}`. Discards without applying.
 
+### `POST /api/repo/fetch-async`, `/pull-async`, `/push-async`
+
+Same body shape as the sync endpoints (`fetch`, `pull`, `push`) but
+returns immediately with `{ "op_id": "<16 hex chars>" }` instead of
+blocking until git finishes. The server spawns the git CLI with piped
+stderr, reads it line-by-line into a shared per-op buffer, and
+transitions the op to `done` / `failed` on process exit.
+
+### `GET /api/repo/op-progress?id=<op_id>`
+
+```json
+{
+  "op_id": "33042c5c6ed01a12",
+  "op": "fetch",
+  "status": "running",
+  "lines": ["Cloning into '.'...", "remote: Enumerating objects: 234"]
+}
+```
+
+`status` is one of `"running"`, `"done"`, `"failed"`. The UI polls
+this endpoint every 500 ms while an async op is in flight, rendering
+each new line in the banner. After completion `summary` carries the
+newline-joined view of all captured lines.
+
 ### `POST /api/repo/fetch`
 
 ```json

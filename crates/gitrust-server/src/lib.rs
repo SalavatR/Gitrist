@@ -1,5 +1,7 @@
+use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use axum::{
     Json, Router,
@@ -16,8 +18,8 @@ use tower_http::trace::TraceLayer;
 
 use gitrust_core::{
     BlameView, BlobView, BranchInfo, CommitDiff, CommitInfo, ConflictView, DEFAULT_SCAN_DEPTH,
-    FileDiff, NetworkOpResult, RemoteBranchInfo, RepoEntry, RepoState, RepoSummary, StashEntry,
-    StatusEntry, TagInfo, TreeEntry, blame_file, checkout as core_checkout,
+    FileDiff, NetworkOpResult, OpProgress, RemoteBranchInfo, RepoEntry, RepoState, RepoSummary,
+    StashEntry, StatusEntry, TagInfo, TreeEntry, blame_file, checkout as core_checkout,
     cherry_pick as core_cherry_pick, cherry_pick_abort as core_cherry_pick_abort,
     cherry_pick_continue as core_cherry_pick_continue, commit as core_commit, commit_info,
     create_branch as core_create_branch, create_tag as core_create_tag,
@@ -775,6 +777,197 @@ async fn repo_cherry_pick(
     Ok(Json(result))
 }
 
+/// Kick off an asynchronous version of `fetch` / `pull` / `push`. The
+/// handler inserts a `running` entry in the shared progress map, spawns
+/// a tokio task that runs the git CLI with piped stderr, and pushes
+/// every line into the map as it arrives. The UI polls
+/// `/api/repo/op-progress` to render those lines as the op runs. On
+/// process exit the entry transitions to `done` / `failed` and the
+/// final `summary` is filled in.
+fn spawn_op_with_progress(
+    auth: AuthState,
+    op: &'static str,
+    repo: PathBuf,
+    args: Vec<String>,
+) -> String {
+    let op_id = generate_op_id();
+    let id_for_map = op_id.clone();
+    let progress = auth.progress.clone();
+    tokio::spawn(async move {
+        progress.write().await.insert(
+            id_for_map.clone(),
+            OpProgress {
+                op_id: id_for_map.clone(),
+                op: op.into(),
+                status: "running".into(),
+                lines: Vec::new(),
+                summary: None,
+            },
+        );
+        let final_status = run_op_with_progress(&repo, &args, &id_for_map, &progress).await;
+        let mut map = progress.write().await;
+        if let Some(state) = map.get_mut(&id_for_map) {
+            state.status = if final_status {
+                "done".into()
+            } else {
+                "failed".into()
+            };
+            state.summary = Some(state.lines.join("\n"));
+        }
+    });
+    op_id
+}
+
+async fn run_op_with_progress(
+    repo: &std::path::Path,
+    args: &[String],
+    id: &str,
+    progress: &Arc<tokio::sync::RwLock<HashMap<String, OpProgress>>>,
+) -> bool {
+    use tokio::io::{AsyncBufReadExt, BufReader};
+    use tokio::process::Command;
+    let mut child = match Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args(args)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+    {
+        Ok(c) => c,
+        Err(e) => {
+            push_line(progress, id, format!("spawning git: {e}")).await;
+            return false;
+        }
+    };
+    let stdout = child.stdout.take();
+    let stderr = child.stderr.take();
+    let mut tasks = Vec::new();
+    if let Some(s) = stdout {
+        let p = progress.clone();
+        let id = id.to_string();
+        tasks.push(tokio::spawn(async move {
+            let mut lines = BufReader::new(s).lines();
+            while let Ok(Some(line)) = lines.next_line().await {
+                push_line(&p, &id, line).await;
+            }
+        }));
+    }
+    if let Some(s) = stderr {
+        let p = progress.clone();
+        let id = id.to_string();
+        tasks.push(tokio::spawn(async move {
+            let mut lines = BufReader::new(s).lines();
+            while let Ok(Some(line)) = lines.next_line().await {
+                push_line(&p, &id, line).await;
+            }
+        }));
+    }
+    let status = child.wait().await;
+    for t in tasks {
+        let _ = t.await;
+    }
+    status.map(|s| s.success()).unwrap_or(false)
+}
+
+async fn push_line(
+    progress: &Arc<tokio::sync::RwLock<HashMap<String, OpProgress>>>,
+    id: &str,
+    line: String,
+) {
+    let mut map = progress.write().await;
+    if let Some(state) = map.get_mut(id) {
+        state.lines.push(line);
+    }
+}
+
+fn generate_op_id() -> String {
+    let mut buf = [0u8; 8];
+    getrandom::getrandom(&mut buf).expect("getrandom for op id");
+    buf.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+async fn repo_fetch_async(
+    State(auth): State<AuthState>,
+    Json(body): Json<FetchBody>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let FetchBody { path, remote } = body;
+    let repo = PathBuf::from(path);
+    let mut args: Vec<String> = vec!["fetch".into(), "--progress".into()];
+    if let Some(r) = remote.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        args.push(r.to_string());
+    }
+    let id = spawn_op_with_progress(auth, "fetch", repo, args);
+    Ok(Json(serde_json::json!({ "op_id": id })))
+}
+
+async fn repo_pull_async(
+    State(auth): State<AuthState>,
+    Json(body): Json<PullBody>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let PullBody {
+        path,
+        remote,
+        ff_only,
+    } = body;
+    let repo = PathBuf::from(path);
+    let mut args: Vec<String> = vec!["pull".into(), "--progress".into()];
+    if ff_only {
+        args.push("--ff-only".into());
+    }
+    if let Some(r) = remote.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        args.push(r.to_string());
+    }
+    let id = spawn_op_with_progress(auth, "pull", repo, args);
+    Ok(Json(serde_json::json!({ "op_id": id })))
+}
+
+async fn repo_push_async(
+    State(auth): State<AuthState>,
+    Json(body): Json<PushBody>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let PushBody {
+        path,
+        remote,
+        refspec,
+        force_with_lease,
+        set_upstream,
+    } = body;
+    let repo = PathBuf::from(path);
+    let mut args: Vec<String> = vec!["push".into(), "--progress".into()];
+    if set_upstream {
+        args.push("-u".into());
+    }
+    if force_with_lease {
+        args.push("--force-with-lease".into());
+    }
+    if let Some(r) = remote.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        args.push(r.to_string());
+        if let Some(rs) = refspec.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+            args.push(rs.to_string());
+        }
+    }
+    let id = spawn_op_with_progress(auth, "push", repo, args);
+    Ok(Json(serde_json::json!({ "op_id": id })))
+}
+
+#[derive(Deserialize)]
+struct OpIdQuery {
+    id: String,
+}
+
+async fn repo_op_progress(
+    State(auth): State<AuthState>,
+    Query(q): Query<OpIdQuery>,
+) -> Result<Json<OpProgress>, ApiError> {
+    let map = auth.progress.read().await;
+    match map.get(&q.id) {
+        Some(state) => Ok(Json(state.clone())),
+        None => Err(ApiError::from(anyhow::anyhow!("op `{}` not found", q.id))),
+    }
+}
+
 async fn repo_push(Json(body): Json<PushBody>) -> Result<Json<NetworkOpResult>, ApiError> {
     let PushBody {
         path,
@@ -1093,13 +1286,22 @@ pub struct AuthState {
     /// sandboxing tradeoff seemed right here. A stricter mode is on
     /// the deferred list.
     pub(crate) root: Option<PathBuf>,
+    /// Shared map of in-flight async network ops (fetch / pull / push).
+    /// The UI polls `/api/repo/op-progress?id=<op_id>` to render git's
+    /// stderr as it streams; entries stick around after completion long
+    /// enough for the UI to read the final line and then expire.
+    pub(crate) progress: Arc<tokio::sync::RwLock<HashMap<String, OpProgress>>>,
 }
 
 impl AuthState {
     /// Construct directly from a token — useful for tests that want a
     /// known value without touching the filesystem.
     pub fn new(token: String) -> Self {
-        Self { token, root: None }
+        Self {
+            token,
+            root: None,
+            progress: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
+        }
     }
 
     /// Same as `new` but also configures the workspace root that
@@ -1108,6 +1310,7 @@ impl AuthState {
         Self {
             token,
             root: Some(root),
+            progress: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
         }
     }
 
@@ -1116,6 +1319,7 @@ impl AuthState {
         Ok(Self {
             token: load_or_create_token()?,
             root: None,
+            progress: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
         })
     }
 
@@ -1125,6 +1329,7 @@ impl AuthState {
         Ok(Self {
             token: load_or_create_token()?,
             root: Some(root),
+            progress: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
         })
     }
 }
@@ -1268,6 +1473,10 @@ pub fn router(source: WebSource, auth: AuthState) -> Router {
         .route("/repo/fetch", post(repo_fetch))
         .route("/repo/pull", post(repo_pull))
         .route("/repo/push", post(repo_push))
+        .route("/repo/fetch-async", post(repo_fetch_async))
+        .route("/repo/pull-async", post(repo_pull_async))
+        .route("/repo/push-async", post(repo_push_async))
+        .route("/repo/op-progress", get(repo_op_progress))
         .route("/repo/merge", post(repo_merge))
         .route("/repo/cherry-pick", post(repo_cherry_pick))
         .route("/repo/state", get(repo_state))
